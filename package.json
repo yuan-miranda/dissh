@@ -2,6 +2,8 @@
   "dependencies": {
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.5",
-    "ssh2": "^1.15.0"
+    "ssh2": "^1.15.0",
+    "strip-ansi": "^7.1.0",
+    "undici-types": "^6.9.0"
   }
 }

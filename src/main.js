@@ -1,6 +1,8 @@
 const { rejects } = require('assert');
 const { connect } = require('http2');
 const { resolve } = require('path');
+const { exit } = require('process');
+const { stream } = require('undici-types');
 
 const fs = require('fs');
 const util = require('util');
@@ -9,8 +11,7 @@ const readFile = util.promisify(fs.readFile);
 const unlink = util.promisify(fs.unlink);
 
 const ssh2 = require('ssh2');
-const { exit } = require('process');
-const { stream } = require('undici-types');
+
 
 let sshSessions = [];
 
@@ -47,15 +48,12 @@ async function createShellSession(host, port, username, password) {
 async function connectShellSession(uid, credentials) {
     return new Promise((resolve, reject) => {
         const session = sshSessions.find(session => session.uid === uid);
-        
         if (!session || !session.client) {
             createShellSession(credentials.host, credentials.port, credentials.username, credentials.password).then((client) => {
                 sshSessions.push({ uid, client });
                 return resolve(client);
 
             }).catch((err) => {
-                // console.log('hint: Make sure the host, port, username, and password are correct.');
-                // console.log('hint: If its your first time connecting, you may need to enter your credentials manually.')
                 return reject(err);
             });
         } else {
@@ -79,16 +77,10 @@ async function executeShellCommand(uid, command) {
             const client = await connectShellSession(uid, credentials);
             
             client.shell((err, stream) => {
-                if (err) {
-                    return reject(err);
-                }
+                if (err) return reject(err);
 
-                stream.on('close', () => {
-                    console.log('stream closed');
-                    client.end();
-                }).on('data', (data) => {
-                    console.log(data.toString());
-                });
+                stream.on('close', () => client.end());
+                stream.on('data', (data) => console.log(data.toString()) );
 
                 // execute the command here.
                 stream.write(`${command}\n`);
@@ -101,25 +93,22 @@ async function executeShellCommand(uid, command) {
     });
 }
 
-// deletes
 async function exitShellSession(uid) {
     return new Promise((resolve, reject) => {
-        const session = sshSessions.find(session => session.uid === uid);
-        if (session) {
-            session.client.end();
-            sshSessions = sshSessions.filter(session => session.uid !== uid);
-            return resolve('SSH session closed successfully.');
-        }
-        else {
-            return reject('Error: No active SSH session found.');
-        }
+        const sessionIndex = sshSessions.findIndex(session => session.uid === uid);
+        if (sessionIndex == -1) return reject('Error: No active SSH session found.');
+        
+        sshSessions[sessionIndex].client.end();
+        sshSessions.splice(sessionIndex, 1);
+        return resolve('SSH session closed successfully.');
+
     });
 }
 
 function saveShellCredentials(uid, credentials) {
-    return writeFile(`${uid}.json`, JSON.stringify(credentials)
+    return writeFile(`${uid}.json`, JSON.stringify(credentials))
         .then(() => 'SSH credentials saved successfully.')
-        .catch(err => Promise.reject(err)));
+        .catch(err => Promise.reject(err));
 }
 
 function loadShellCredentials(uid) {
@@ -129,28 +118,14 @@ function loadShellCredentials(uid) {
 }
 
 function deleteShellCredentials(uid) {
-    // convert this similar to saveShellCredentials() and loadShellCredentials()?
-    return new Promise((resolve, reject) => {
-        const session = sshSessions.find(session => session.uid === uid);
-        if (!session) {
-            return reject('Error: No saved SSH credentials found.');
-        }
-        else {
-            // delete the credentials in the file.
-            unlink(`${uid}.json`).then(() => {
-                // delete the credentials in the array.
-                exitShellSession(uid).then((result) => {
-                    return resolve(result);
+    return unlink(`${uid}.json`)
+        .then(() => {
+            const sessionIndex = sshSessions.findIndex(session => session.uid === uid);
+            if (sessionIndex == -1) return 'Error: No active SSH session found.';
 
-                }).catch((err) => {
-                    // failed to delete the credentials in the array.
-                    return reject(err);
-                });
-
-            }).catch((err) => {
-                // failed to delete the credentials in the file.
-                return reject(err);
-            });
-        }
-    });
+            return exitShellSession(uid)
+                .then(() => 'SSH credentials deleted successfully.')
+                .catch(err => Promise.reject(err));
+        })
+        .catch(err => Promise.reject(err));
 }

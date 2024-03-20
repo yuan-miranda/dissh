@@ -16,7 +16,8 @@ const readFile = util.promisify(fs.readFile);
 const unlink = util.promisify(fs.unlink);
 const ssh2 = require('ssh2');
 
-let sshSessions = [];
+let sshSessions = {};
+let sshStreams = {};
 
 // create a new SSH session.
 async function createShellSession(uid, host, port, username, password) {
@@ -46,9 +47,9 @@ async function createShellSession(uid, host, port, username, password) {
 // connect shell session by uid and credentials
 async function findShellSession(uid) {
     return new Promise((resolve, reject) => {
-        const session = sshSessions.find(session => session.uid === uid);
-        if (session && session.client) {
-            return resolve(session.client);
+        const session = sshSessions[uid];
+        if (session) {
+            return resolve(session);
         }
         return reject('Error: No active SSH session found. Please use /sshd to start a new session.');
     });
@@ -61,19 +62,19 @@ async function findShellSession(uid) {
 */
 async function connectShellSession(uid, credentials) {
     return new Promise((resolve, reject) => {
-        const session = sshSessions.find(session => session.uid === uid);
+        const session = sshSessions[uid];
         // return error if the user has an active SSH session.
         /*
             originally, I intended to just return the session, but I dont like being able to use
             /ssh after /exit, feels like a bug to me. So now, it needs to use /sshd first to start a new session.
         */
-        if (session && session.client) {
+        if (session) {
             return reject('Error: User already has an active SSH session.');
         }
 
         // else if the user has no active SSH session, create a new one.
         createShellSession(uid, credentials.host, credentials.port, credentials.username, credentials.password).then((client) => {
-            sshSessions.push({ uid, client });
+            sshSessions[uid] = client;
             return resolve(client);
 
         // if the input credentials are wrong, then try to load the credentials from the file and use it to connect.
@@ -108,34 +109,43 @@ async function connectShellSession(uid, credentials) {
 }
 
 // idk what to name the SSH, so its 'client' for now.
-async function executeShellCommand(client, command) {
+async function executeShellCommand(uid, command) {
     return new Promise(async (resolve, reject) => {
         const stripAnsi = await import('strip-ansi');
+        const client = sshSessions[uid];
 
-        client.shell((err, stream) => {
-            if (err) return reject(err);
-            
-            let output = '';
+        let output = '';
 
-            stream.on('data', (data) => {
-                output += stripAnsi.default(data.toString());
+        if (!sshStreams[uid]) {
+            sshStreams[uid] = await new Promise((resolve, reject) => {
+                client.shell((err, stream) => {
+                    if (err) return reject(err);
+                    return resolve(stream);
+                });
             });
+        }
 
-            // execute the command here.
-            stream.write(`${command}\n`);
-            
-            setTimeout(() => resolve(output), 5000);
+        const stream = sshStreams[uid];
+
+        stream.on('data', (data) => {
+            output += stripAnsi.default(data.toString());
         });
+
+        // execute the command here.
+        stream.write(`${command}\n`);
+
+        setTimeout(() => resolve(output), 5000);
     });
 }
 
 async function exitShellSession(uid) {
     return new Promise((resolve, reject) => {
-        const sessionIndex = sshSessions.findIndex(session => session.uid === uid);
-        if (sessionIndex == -1) return reject('Error: No active SSH session found.');
+        const session = sshSessions[uid];
+        if (!session) return reject('Error: No active SSH session found.');
         
-        sshSessions[sessionIndex].client.end();
-        sshSessions.splice(sessionIndex, 1);
+        session.end();
+        delete sshSessions[uid];
+        delete sshStreams[uid];
         return resolve('SSH session closed successfully.');
 
     });
@@ -156,10 +166,11 @@ function loadShellCredentials(uid) {
 function deleteShellCredentials(uid) {
     return unlink(`${uid}.json`)
         .then(() => {
-            const sessionIndex = sshSessions.findIndex(session => session.uid === uid);
-            if (sessionIndex != -1) {
-                sshSessions[sessionIndex].client.end();
-                sshSessions.splice(sessionIndex, 1);
+            const session = sshSessions[uid];
+            if (session) {
+                session.end();
+                delete sshSessions[uid];
+                delete sshStreams[uid];
             }
             return 'SSH credentials deleted successfully.';
         })
@@ -195,7 +206,7 @@ client.on('interactionCreate', async (interaction) => {
     
 
     const { commandName } = interaction;
-    const userId = interaction.user.id;
+    const uid = interaction.user.id;
 
     if (commandName === 'sshd') {
         const host = interaction.options.getString('host');
@@ -205,7 +216,7 @@ client.on('interactionCreate', async (interaction) => {
         
         await interaction.deferReply({ ephemeral: true });
 
-        connectShellSession(userId, { host, port, username, password }).then((client) => {
+        connectShellSession(uid, { host, port, username, password }).then((client) => {
             interaction.editReply({ content: 'SSH session started successfully.', ephemeral: true });
         }).catch((err) => {
             interaction.editReply({ content: err, ephemeral: true });
@@ -213,7 +224,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     else if (commandName === 'exit') {
-        exitShellSession(userId).then((result) => {
+        exitShellSession(uid).then((result) => {
             interaction.reply(result);
         }).catch((err) => {
             interaction.reply(err);
@@ -221,8 +232,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     else if (commandName === 'purge') {
-        deleteShellCredentials(userId).then((result) => {
-            console.log('deleted');
+        deleteShellCredentials(uid).then((result) => {
             interaction.reply(result);
         }).catch((err) => {
             interaction.reply(err);
@@ -233,8 +243,9 @@ client.on('interactionCreate', async (interaction) => {
         const command = interaction.options.getString('command');
         await interaction.deferReply({ ephemeral: true });
 
-        findShellSession(userId).then((client) => {
-            executeShellCommand(client, command).then((result) => {
+        findShellSession(uid).then((client) => {
+            sshSessions[uid] = client;
+            executeShellCommand(uid, command).then((result) => {
                 interaction.editReply('```' + result + '```');
             }).catch((err) => {
                 interaction.editReply(err);

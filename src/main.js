@@ -88,6 +88,9 @@ async function connectShellSession(uid, credentials) {
                 return reject('Error: Invalid Username or Password.');
             }
             else {
+                if (credentials.host && credentials.port && credentials.username && credentials.password) {
+                    return reject('Error: SSH specified might not exist or is not accessible.');
+                }
                 loadShellCredentials(uid).then((credentials) => {
                     connectShellSession(uid, credentials).then((client) => {
                         return resolve(client);
@@ -114,16 +117,14 @@ async function executeShellCommand(client, command) {
             
             let output = '';
 
-            stream.on('close', () => client.end());
-            stream.on('data', async (data) => {
+            stream.on('data', (data) => {
                 output += stripAnsi.default(data.toString());
-                await writeFile('output.txt', output);
-                return resolve(output);
             });
 
             // execute the command here.
             stream.write(`${command}\n`);
             
+            setTimeout(() => resolve(output), 5000);
         });
     });
 }
@@ -155,11 +156,14 @@ function loadShellCredentials(uid) {
 function deleteShellCredentials(uid) {
     return unlink(`${uid}.json`)
         .then(() => {
-            return exitShellSession(uid)
-                .then(() => 'SSH credentials deleted successfully.')
-                .catch(err => Promise.reject(err));
+            const sessionIndex = sshSessions.findIndex(session => session.uid === uid);
+            if (sessionIndex != -1) {
+                sshSessions[sessionIndex].client.end();
+                sshSessions.splice(sessionIndex, 1);
+            }
+            return 'SSH credentials deleted successfully.';
         })
-        .catch(err => Promise.reject("Error: No saved SSH credentials found."));
+        .catch(err => Promise.reject('Error: No saved SSH credentials found.'));
 }
 
 /* ==================================================================================================== */
@@ -218,6 +222,7 @@ client.on('interactionCreate', async (interaction) => {
 
     else if (commandName === 'purge') {
         deleteShellCredentials(userId).then((result) => {
+            console.log('deleted');
             interaction.reply(result);
         }).catch((err) => {
             interaction.reply(err);
@@ -226,15 +231,16 @@ client.on('interactionCreate', async (interaction) => {
 
     else if (commandName === 'ssh') {
         const command = interaction.options.getString('command');
+        await interaction.deferReply({ ephemeral: true });
 
         findShellSession(userId).then((client) => {
             executeShellCommand(client, command).then((result) => {
-                interaction.reply(result);
+                interaction.editReply('```' + result + '```');
             }).catch((err) => {
-                interaction.reply(err);
+                interaction.editReply(err);
             });
         }).catch((err) => {
-            interaction.reply(err);
+            interaction.editReply(err);
         });
     }
 });

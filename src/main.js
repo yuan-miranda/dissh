@@ -78,7 +78,7 @@ async function connectShellSession(uid, credentials) {
 
         // if the input credentials are wrong, then try to load the credentials from the file and use it to connect.
         }).catch((err) => {
-            if (err.message.includes('getaddrinfo ENOTFOUND' && !credentials.host)) {
+            if (err.message.includes('getaddrinfo ENOTFOUND')) {
                 return reject('Error: Invalid IP address.');
             }
             else if (err.message.includes('connect ECONNREFUSED')) {
@@ -149,20 +149,17 @@ function saveShellCredentials(uid, credentials) {
 function loadShellCredentials(uid) {
     return readFile(`${uid}.json`)
         .then(data => JSON.parse(data))
-        .catch(err => Promise.reject("Error: No SSH credentials found."));
+        .catch(err => Promise.reject("Error: No saved SSH credentials found."));
 }
 
 function deleteShellCredentials(uid) {
     return unlink(`${uid}.json`)
         .then(() => {
-            const sessionIndex = sshSessions.findIndex(session => session.uid === uid);
-            if (sessionIndex == -1) return 'Error: No active SSH session found.';
-
             return exitShellSession(uid)
                 .then(() => 'SSH credentials deleted successfully.')
                 .catch(err => Promise.reject(err));
         })
-        .catch(err => Promise.reject("Error: No SSH credentials found."));
+        .catch(err => Promise.reject("Error: No saved SSH credentials found."));
 }
 
 /* ==================================================================================================== */
@@ -191,6 +188,8 @@ client.on("messageCreate", async (message) => {
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isCommand()) return;
 
+    
+
     const { commandName } = interaction;
     const userId = interaction.user.id;
 
@@ -199,11 +198,13 @@ client.on('interactionCreate', async (interaction) => {
         const port = interaction.options.getInteger('port');
         const username = interaction.options.getString('username');
         const password = interaction.options.getString('password');
+        
+        interaction.deferReply({ ephemeral: true });
 
         connectShellSession(userId, { host, port, username, password }).then((client) => {
-            interaction.reply({ content: 'SSH session started successfully.', ephemeral: true });
+            interaction.editReply({ content: 'SSH session started successfully.', ephemeral: true });
         }).catch((err) => {
-            interaction.reply({ content: err, ephemeral: true });
+            interaction.editReply({ content: err, ephemeral: true });
         });
     }
 

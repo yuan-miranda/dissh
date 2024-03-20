@@ -201,9 +201,9 @@ client.on('interactionCreate', async (interaction) => {
         const password = interaction.options.getString('password');
 
         connectShellSession(userId, { host, port, username, password }).then((client) => {
-            interaction.reply('SSH session started successfully.');
+            interaction.reply({ content: 'SSH session started successfully.', ephemeral: true });
         }).catch((err) => {
-            interaction.reply(err);
+            interaction.reply({ content: err, ephemeral: true });
         });
     }
 

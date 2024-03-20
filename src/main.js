@@ -1,11 +1,20 @@
+/*
+    Note from creator: Currently, dont run any that will indefinitely run a command or output a lot of output message.
+    Theres still no issue other than a very long output message that will be stored on my machine. But stil lmao.
+
+    Some commands that I recomment to refrain from using:
+    - cmatrix
+    - your mom's weight
+    - htop ?
+    - any command that will output a lot of text.
+*/
+
 const fs = require('fs');
 const util = require('util');
 const writeFile = util.promisify(fs.writeFile);
 const readFile = util.promisify(fs.readFile);
 const unlink = util.promisify(fs.unlink);
-
 const ssh2 = require('ssh2');
-require('dotenv').config();
 
 let sshSessions = [];
 
@@ -34,16 +43,33 @@ async function createShellSession(uid, host, port, username, password) {
     });
 }
 
-// connect or create a new SSH session.
+// connect shell session by uid and credentials
+async function findShellSession(uid) {
+    return new Promise((resolve, reject) => {
+        const session = sshSessions.find(session => session.uid === uid);
+        if (session && session.client) {
+            return resolve(session.client);
+        }
+        return reject('Error: No active SSH session found. Please use /sshd to start a new session.');
+    });
+}
+
+// connect to an existing SSH session. ?
 /*
     uid: the user id of the person who is trying to connect.
     credentials: the credentials to use to connect.
 */
-async function connectShellSession(uid, credentials, attempts = 0) {
+async function connectShellSession(uid, credentials) {
     return new Promise((resolve, reject) => {
         const session = sshSessions.find(session => session.uid === uid);
-        // use uid to find if the user has an active SSH session, and just reconnect to it.
-        if (session && session.client) return resolve(session.client);
+        // return error if the user has an active SSH session.
+        /*
+            originally, I intended to just return the session, but I dont like being able to use
+            /ssh after /exit, feels like a bug to me. So now, it needs to use /sshd first to start a new session.
+        */
+        if (session && session.client) {
+            return reject('Error: User already has an active SSH session.');
+        }
 
         // else if the user has no active SSH session, create a new one.
         createShellSession(uid, credentials.host, credentials.port, credentials.username, credentials.password).then((client) => {
@@ -52,19 +78,28 @@ async function connectShellSession(uid, credentials, attempts = 0) {
 
         // if the input credentials are wrong, then try to load the credentials from the file and use it to connect.
         }).catch((err) => {
-            if (attempts == 5) return reject('Error: Failed to connect to the SSH server. Please update your credentials using the `sshd` command.');
+            if (err.message.includes('getaddrinfo ENOTFOUND' && !credentials.host)) {
+                return reject('Error: Invalid IP address.');
+            }
+            else if (err.message.includes('connect ECONNREFUSED')) {
+                return reject('Error: Invalid Port, typically 8022 is used.');
+            }
+            else if (err.message.includes('All configured authentication methods failed')) {
+                return reject('Error: Invalid Username or Password.');
+            }
+            else {
+                loadShellCredentials(uid).then((credentials) => {
+                    connectShellSession(uid, credentials).then((client) => {
+                        return resolve(client);
+                    }).catch((err) => {
+                        return reject(err);
+                    });
 
-            loadShellCredentials(uid).then((credentials) => {
-                connectShellSession(uid, credentials, attempts + 1).then((client) => {
-                    return resolve(client);
+                // else, error.
                 }).catch((err) => {
                     return reject(err);
-                });
-                
-            // else, error.
-            }).catch((err) => {
-                return reject(err);
-            });
+                });    
+            }
         });
     });
 }
@@ -80,19 +115,15 @@ async function executeShellCommand(client, command) {
             let output = '';
 
             stream.on('close', () => client.end());
-            stream.on('data', (data) => {
-
+            stream.on('data', async (data) => {
                 output += stripAnsi.default(data.toString());
-                writeFile('output.txt', output);
-                
-                // take only the command output using REGEX.
-
+                await writeFile('output.txt', output);
+                return resolve(output);
             });
 
             // execute the command here.
             stream.write(`${command}\n`);
             
-            return resolve(output);
         });
     });
 }
@@ -118,7 +149,7 @@ function saveShellCredentials(uid, credentials) {
 function loadShellCredentials(uid) {
     return readFile(`${uid}.json`)
         .then(data => JSON.parse(data))
-        .catch(err => Promise.reject(err));
+        .catch(err => Promise.reject("Error: No SSH credentials found."));
 }
 
 function deleteShellCredentials(uid) {
@@ -131,16 +162,15 @@ function deleteShellCredentials(uid) {
                 .then(() => 'SSH credentials deleted successfully.')
                 .catch(err => Promise.reject(err));
         })
-        .catch(err => Promise.reject(err));
+        .catch(err => Promise.reject("Error: No SSH credentials found."));
 }
-
-
 
 /* ==================================================================================================== */
 // The following code is for the Discord bot.
 
-const { Client, GatewayIntentBits } = require('discord.js');
-
+const { Client, GatewayIntentBits, DiscordAPIError } = require('discord.js');
+const { FileNotFound } = require('discord.js/src/errors/ErrorCodes');
+require('dotenv').config();
 
 const client = new Client({
     intents: [
@@ -194,12 +224,9 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     else if (commandName === 'ssh') {
-        // should i find by the array or load from the file?
-        
         const command = interaction.options.getString('command');
-        const credendentials = loadShellCredentials(userId);
-        
-        connectShellSession(userId, credendentials).then((client) => {
+
+        findShellSession(userId).then((client) => {
             executeShellCommand(client, command).then((result) => {
                 interaction.reply(result);
             }).catch((err) => {

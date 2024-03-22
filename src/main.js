@@ -1,6 +1,6 @@
 /*
-    Note from creator: Currently, dont run any that will indefinitely run a command or output a lot of output message.
-    Theres still no issue other than a very long output message that will be stored on my machine. But stil lmao.
+    Note from creator: Currently, dont run any that will indefinitely run a command and outputs
+    a lot of text. This is because the bot will only output the last 32767 characters of the output.
 
     Some commands that I recomment to refrain from using:
     - cmatrix
@@ -18,6 +18,8 @@ const ssh2 = require('ssh2');
 
 let sshSessions = {};
 let sshStreams = {};
+let lastBotMessage = {};
+let lastOutputStream = {};
 
 // create a new SSH session.
 async function createShellSession(uid, host, port, username, password) {
@@ -55,7 +57,6 @@ async function findShellSession(uid) {
     });
 }
 
-// connect to an existing SSH session. ?
 /*
     uid: the user id of the person who is trying to connect.
     credentials: the credentials to use to connect.
@@ -108,7 +109,6 @@ async function connectShellSession(uid, credentials) {
     });
 }
 
-// idk what to name the SSH, so its 'client' for now.
 async function executeShellCommand(uid, command) {
     return new Promise(async (resolve, reject) => {
         const stripAnsi = await import('strip-ansi');
@@ -129,12 +129,21 @@ async function executeShellCommand(uid, command) {
 
         stream.on('data', (data) => {
             output += stripAnsi.default(data.toString());
+            if (output.length >= 32767) {
+                output = output.substring(output.length - 32767);
+            }
         });
 
         // execute the command here.
         stream.write(`${command}\n`);
 
-        setTimeout(() => resolve(output), 5000);
+        setTimeout(() => {
+            lastOutputStream[uid] += output;
+            if (lastOutputStream[uid].length >= 32767) {
+                lastOutputStream[uid] = lastOutputStream[uid].substring(lastOutputStream[uid].length - 32767);
+            }
+            return resolve(lastOutputStream[uid]);
+        }, 2000);
     });
 }
 
@@ -180,8 +189,7 @@ function deleteShellCredentials(uid) {
 /* ==================================================================================================== */
 // The following code is for the Discord bot.
 
-const { Client, GatewayIntentBits, DiscordAPIError } = require('discord.js');
-const { FileNotFound } = require('discord.js/src/errors/ErrorCodes');
+const { Client, GatewayIntentBits } = require('discord.js');
 require('dotenv').config();
 
 const client = new Client({
@@ -200,13 +208,23 @@ client.once("ready", () => {
 client.on("messageCreate", async (message) => {
 });
 
+client.on('messageDelete', async (message) => {
+    for (let uid in lastBotMessage) {
+        if (lastBotMessage[uid].id === message.id) {
+            lastBotMessage[uid] = null;
+            break;
+        }
+    }
+});
+
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isCommand()) return;
 
-    
-
     const { commandName } = interaction;
     const uid = interaction.user.id;
+
+    // avoid the bot from responding to itself.
+    if (interaction.user.bot) return;
 
     if (commandName === 'sshd') {
         const host = interaction.options.getString('host');
@@ -217,41 +235,58 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
 
         connectShellSession(uid, { host, port, username, password }).then((client) => {
-            interaction.editReply({ content: 'SSH session started successfully.', ephemeral: true });
+            interaction.editReply('SSH session started successfully.');
         }).catch((err) => {
-            interaction.editReply({ content: err, ephemeral: true });
+            interaction.editReply(err);
         });
     }
 
     else if (commandName === 'exit') {
         exitShellSession(uid).then((result) => {
-            interaction.reply(result);
+            // comment this if you want to keep the command output even after the session is closed.
+            lastOutputStream[uid] = '';
+
+            interaction.reply({ content: result, ephemeral: true });
         }).catch((err) => {
-            interaction.reply(err);
+            interaction.reply({ content: err, ephemeral: true });
         });
     }
 
     else if (commandName === 'purge') {
         deleteShellCredentials(uid).then((result) => {
-            interaction.reply(result);
+            interaction.reply({ content: result, ephemeral: true });
         }).catch((err) => {
-            interaction.reply(err);
+            interaction.reply({ content: err, ephemeral: true });
         });
     }
 
     else if (commandName === 'ssh') {
         const command = interaction.options.getString('command');
-        await interaction.deferReply({ ephemeral: true });
-
-        findShellSession(uid).then((client) => {
+        
+        findShellSession(uid).then(async (client) => {
             sshSessions[uid] = client;
-            executeShellCommand(uid, command).then((result) => {
-                interaction.editReply('```' + result + '```');
-            }).catch((err) => {
-                interaction.editReply(err);
-            });
+            try {
+                await interaction.deferReply();
+                let result = await executeShellCommand(uid, command);
+                
+                // code later:
+                // using react of either [Mobile view] or [PC view]
+                // send the result to the user in private based on the selection
+                // for file: Send the file, this could cover all the output
+                // for message: Send in text format, but output is limited to the last 2000 characters.
+
+                await writeFile(`${uid}_result.txt`, result);
+
+                if (lastBotMessage[uid]) {
+                    await lastBotMessage[uid].delete();
+                }
+
+                lastBotMessage[uid] = await interaction.editReply({ files: [`${uid}_result.txt`] });
+            } catch (err) {
+                interaction.editReply({ content: err.toString(), ephemeral: true });
+            }
         }).catch((err) => {
-            interaction.editReply(err);
+            interaction.reply({ content: err, ephemeral: true });
         });
     }
 });

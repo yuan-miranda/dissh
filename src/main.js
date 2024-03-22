@@ -161,19 +161,19 @@ async function exitShellSession(uid) {
 }
 
 function saveShellCredentials(uid, credentials) {
-    return writeFile(`${uid}.json`, JSON.stringify(credentials))
+    return writeFile(`data/${uid}.json`, JSON.stringify(credentials))
         .then(() => 'SSH credentials saved successfully.')
         .catch(err => Promise.reject(err));
 }
 
 function loadShellCredentials(uid) {
-    return readFile(`${uid}.json`)
+    return readFile(`data/${uid}.json`)
         .then(data => JSON.parse(data))
         .catch(err => Promise.reject("Error: No saved SSH credentials found."));
 }
 
 function deleteShellCredentials(uid) {
-    return unlink(`${uid}.json`)
+    return unlink(`data/${uid}.json`)
         .then(() => {
             const session = sshSessions[uid];
             if (session) {
@@ -275,13 +275,13 @@ client.on('interactionCreate', async (interaction) => {
                 // for file: Send the file, this could cover all the output
                 // for message: Send in text format, but output is limited to the last 2000 characters.
 
-                await writeFile(`${uid}_result.txt`, result);
+                await writeFile(`output/${uid}.txt`, result);
 
                 if (lastBotMessage[uid]) {
                     await lastBotMessage[uid].delete();
                 }
 
-                lastBotMessage[uid] = await interaction.editReply({ files: [`${uid}_result.txt`] });
+                lastBotMessage[uid] = await interaction.editReply({ files: [`output/${uid}.txt`] });
             } catch (err) {
                 interaction.editReply({ content: err.toString(), ephemeral: true });
             }

@@ -1,4 +1,4 @@
-## Discord Interace Shell (dissh)
+## Discord Interactive Shell (dissh)
 A discord bot capable of accessing remote shell.
 
 > [src/main.js](https://github.com/yuan-miranda/dissh/blob/main/src/main.js) source code of the bot.<br>

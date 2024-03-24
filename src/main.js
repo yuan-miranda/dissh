@@ -1,6 +1,7 @@
 /*
     Note from creator: Currently, dont run any that will indefinitely run a command and outputs
-    a lot of text. This is because the bot will only output the last 32767 characters of the output.
+    a lot of text. This is because the bot will only output the last 32767 characters of the output in file mode,
+    but only the last 1900 characters in text mode.
 
     Some commands that I recomment to refrain from using:
     - cmatrix
@@ -18,7 +19,9 @@ const ssh2 = require('ssh2');
 
 let sshSessions = {};
 let sshStreams = {};
+let interactionStreams = {};
 let lastBotMessage = {};
+let lastBotMessageNotDeleted = {};
 let lastOutputStream = {};
 
 // create a new SSH session.
@@ -189,7 +192,7 @@ function deleteShellCredentials(uid) {
 /* ==================================================================================================== */
 // The following code is for the Discord bot.
 
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, ButtonBuilder, ActionRowBuilder } = require('discord.js');
 require('dotenv').config();
 
 const client = new Client({
@@ -210,6 +213,11 @@ client.on("messageCreate", async (message) => {
 
 client.on('messageDelete', async (message) => {
     for (let uid in lastBotMessage) {
+
+        // TODO
+        // other users can also delete the message.
+        // fix this later.
+
         if (lastBotMessage[uid].id === message.id) {
             lastBotMessage[uid] = null;
             break;
@@ -218,7 +226,7 @@ client.on('messageDelete', async (message) => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isCommand()) return;
+    if (!interaction.isCommand() && !interaction.isButton()) return;
 
     const { commandName } = interaction;
     const uid = interaction.user.id;
@@ -242,10 +250,12 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     else if (commandName === 'exit') {
-        exitShellSession(uid).then((result) => {
-            // comment this if you want to keep the command output even after the session is closed.
-            lastOutputStream[uid] = '';
-
+        exitShellSession(uid).then( async (result) => {
+            lastBotMessageNotDeleted[lastBotMessage[uid].id] = lastBotMessage[uid];
+            await writeFile(`output/${lastBotMessage[uid].id}.txt`, lastOutputStream[uid]);
+            
+            delete lastOutputStream[uid];
+            delete lastBotMessage[uid];
             interaction.reply({ content: result, ephemeral: true });
         }).catch((err) => {
             interaction.reply({ content: err, ephemeral: true });
@@ -263,31 +273,68 @@ client.on('interactionCreate', async (interaction) => {
     else if (commandName === 'ssh') {
         const command = interaction.options.getString('command');
         
+        const viewInText = new ButtonBuilder()
+            .setCustomId('view_in_text')
+            .setLabel('View in Text')
+            .setStyle('Primary');
+        
+        const row = new ActionRowBuilder().addComponents(viewInText);
+
         findShellSession(uid).then(async (client) => {
             sshSessions[uid] = client;
             try {
                 await interaction.deferReply();
                 let result = await executeShellCommand(uid, command);
-                
-                // code later:
-                // using react of either [Mobile view] or [PC view]
-                // send the result to the user in private based on the selection
-                // for file: Send the file, this could cover all the output
-                // for message: Send in text format, but output is limited to the last 2000 characters.
-
-                await writeFile(`output/${uid}.txt`, result);
 
                 if (lastBotMessage[uid]) {
                     await lastBotMessage[uid].delete();
                 }
 
-                lastBotMessage[uid] = await interaction.editReply({ files: [`output/${uid}.txt`] });
+                // TODO
+                // currently will create a new file for each command, it would not overwrite the previous file.
+                // fix this later.
+
+                // placeholder file to be sent to the user.
+                await writeFile("output/placeholder.txt", result);
+                
+                lastBotMessage[uid] = await interaction.editReply({ files: ["output/placeholder.txt"], components: [row]});
+                
+                // delete the placeholder file after sending it to the user and make the actual file.
+                await unlink("output/placeholder.txt");
+                await writeFile(`output/${lastBotMessage[uid].id}.txt`, result);
+                
+                // key-val pair of the message id and the user id for the correct button interaction.
+                interactionStreams[lastBotMessage[uid].id] = uid;
+
             } catch (err) {
                 interaction.editReply({ content: err.toString(), ephemeral: true });
             }
         }).catch((err) => {
             interaction.reply({ content: err, ephemeral: true });
         });
+    }
+
+    else if (interaction.isButton()) {
+        if (interaction.customId === 'view_in_text') {
+            try {
+                await interaction.deferReply({ ephemeral: true });
+                let content;
+
+                if (lastBotMessageNotDeleted[interaction.message.id]) {
+                    content = await readFile(`output/${interaction.message.id}.txt`, 'utf-8');
+                } else {
+                    content = await readFile(`output/${interaction.message.id}.txt`, 'utf-8');
+                }
+                
+                if (content.length >= 2000) {
+                    content = content.substring(content.length - 1900);
+                }
+
+                await interaction.editReply({ content: "```" + content + "```"});
+            } catch (err) {
+                interaction.editReply({ content: err.toString()});
+            }
+        }
     }
 });
 

@@ -212,17 +212,18 @@ client.on("messageCreate", async (message) => {
 });
 
 client.on('messageDelete', async (message) => {
-    for (let uid in lastBotMessage) {
-
-        // TODO
-        // other users can also delete the message.
-        // fix this later.
-
-        if (lastBotMessage[uid].id === message.id) {
-            lastBotMessage[uid] = null;
-            break;
+    try {
+        await unlink(`output/${message.id}.txt`);
+        if (lastBotMessageNotDeleted[message.id]) {
+            console.log("deleted old " + message.id);
+            delete lastBotMessageNotDeleted[message.id];
         }
-    }
+        
+        else if (lastBotMessage[interactionStreams[message.id]]) {
+            console.log("deleted new " + message.id);
+            lastBotMessage[interactionStreams[message.id]] = null;
+        }
+    } catch (err) {} // do nothing, this only occurs when updating the message.
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -286,24 +287,24 @@ client.on('interactionCreate', async (interaction) => {
                 await interaction.deferReply();
                 let result = await executeShellCommand(uid, command);
 
+                // TODO
+                // doesnt work when in another server or channel, obv because of
+                // different message id, anyway but ill still fix it.
+
                 if (lastBotMessage[uid]) {
-                    await lastBotMessage[uid].delete();
+                    await interaction.deleteReply();
+                    await writeFile(`output/${lastBotMessage[uid].id}.txt`, result);
+                    const message = await interaction.fetchReply(lastBotMessage[uid].id);
+                    const messageUpdate = await message.edit({ files: [`output/${lastBotMessage[uid].id}.txt`], components: [row]});
+                    console.log("update " + message + " " + messageUpdate);
+                } else {
+                    await writeFile("output/placeholder.txt", result);
+                    lastBotMessage[uid] = await interaction.editReply({ files: ["output/placeholder.txt"], components: [row]});
+                    console.log("new " + lastBotMessage[uid].id);
+                    await unlink("output/placeholder.txt");
+                    await writeFile(`output/${lastBotMessage[uid].id}.txt`, result);
                 }
 
-                // TODO
-                // currently will create a new file for each command, it would not overwrite the previous file.
-                // fix this later.
-
-                // placeholder file to be sent to the user.
-                await writeFile("output/placeholder.txt", result);
-                
-                lastBotMessage[uid] = await interaction.editReply({ files: ["output/placeholder.txt"], components: [row]});
-                
-                // delete the placeholder file after sending it to the user and make the actual file.
-                await unlink("output/placeholder.txt");
-                await writeFile(`output/${lastBotMessage[uid].id}.txt`, result);
-                
-                // key-val pair of the message id and the user id for the correct button interaction.
                 interactionStreams[lastBotMessage[uid].id] = uid;
 
             } catch (err) {

@@ -5,14 +5,51 @@ const ssh2 = require('ssh2');
 // store all the shell session.
 // key: uid, value: ssh2.Client()
 let shellSessionArray = {};
+function saveSession(uid, session) {
+    shellSessionArray[uid] = session;
+}
+function loadSession(uid) {
+    return shellSessionArray[uid];
+}
+function deleteSession(uid) {
+    delete shellSessionArray[uid];
+}
 
 // store all shell stream.
 // key: uid, value: ssh2.Client().shell((stream))
 let shellStreamArray = {};
+function saveStream(uid, stream) {
+    shellStreamArray[uid] = stream;
+}
+function loadStream(uid, session) {
+    return new Promise((resolve, reject) => {
+        // return resolved immediately if stream already exists.
+        if (shellStreamArray[uid]) return resolve(shellStreamArray[uid]);
+
+        // else create a new stream
+        session.shell((err, stream) => {
+            if (err) return reject(err);
+            saveStream(uid, stream);
+            return resolve(stream);
+        });
+    });
+}
+function deleteStream(uid) {
+    delete shellStreamArray[uid];
+}
 
 // store all the shell stream final output.
 // key: uid, value: string
 let shellStreamOutputArray = {};
+function saveStreamOutput(uid, output) {
+    shellStreamOutputArray[uid] = output;
+}
+function loadStreamOutput(uid) {
+    return shellStreamOutputArray[uid];
+}
+function deleteStreamOutput(uid) {
+    delete shellStreamOutputArray[uid];
+}
 
 // store all the messages after /exit was excuted.
 // key: message.id, value: message
@@ -213,46 +250,6 @@ function deleteCredentials(uid) {
     }
 }
 
-function saveSession(uid, session) {
-    shellSessionArray[uid] = session;
-}
-function loadSession(uid) {
-    return shellSessionArray[uid];
-}
-function deleteSession(uid) {
-    delete shellSessionArray[uid];
-}
-
-function saveStream(uid, stream) {
-    shellStreamArray[uid] = stream;
-}
-function loadStream(uid, session) {
-    return new Promise((resolve, reject) => {
-        // return resolved immediately if stream already exists.
-        if (shellStreamArray[uid]) return resolve(shellStreamArray[uid]);
-
-        // else create a new stream
-        session.shell((err, stream) => {
-            if (err) return reject(err);
-            saveStream(uid, stream);
-            return resolve(stream);
-        });
-    });
-}
-function deleteStream(uid) {
-    delete shellStreamArray[uid];
-}
-
-function saveStreamOutput(uid, output) {
-    shellStreamOutputArray[uid] = output;
-}
-function loadStreamOutput(uid) {
-    return shellStreamOutputArray[uid];
-}
-function deleteStreamOutput(uid) {
-    delete shellStreamOutputArray[uid];
-}
-
 /* ==================================================================================================== */
 // The following code is for the Discord bot.
 
@@ -270,6 +267,7 @@ const client = new Client({
 
 client.once('ready', () => {
     console.log(`${client.user.tag} is online.`);
+    client.user.setActivity(`${Object.keys(shellSessionArray).length || 0} active session(s)`);
 });
 
 client.on('messageCreate', async (message) => {
@@ -329,6 +327,7 @@ client.on('interactionCreate', async (interaction) => {
                 await connectShellSession(userId, { host, port, username, password });
             }
             await interaction.editReply("SSH session connected.");
+            client.user.setActivity(`${Object.keys(shellSessionArray).length || 0} active session(s)`);
         } catch (err) {
             await interaction.editReply(err);
         }
@@ -338,6 +337,9 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
         try {
             const status = await disconnectSession(userId);
+            client.user.setActivity(`${Object.keys(shellSessionArray).length || 0} active session(s)`);
+            if (!loadActiveMessage(userId)) return await interaction.editReply(status);
+
             deleteStream(userId);
             deleteStreamOutput(userId);
             saveOldMessage(loadActiveMessage(userId).id, loadActiveMessage(userId));
@@ -372,48 +374,32 @@ client.on('interactionCreate', async (interaction) => {
         try {
             await interaction.deferReply({ ephemeral: false});
             const result = await executeCommand(userId, command);
+            let oldMessage;
             let message;
 
-            // serverA/B-channelA/B
+            // if there is an previous active message, delete it.
             if (loadActiveMessage(userId)) {
-                // channelA
+                // if the previous active message is in the same channel.
                 if (loadMessageLocation(activeMessageArray[userId].id).channelId === channelId) {
-                    await interaction.deleteReply();
-                    
-                    fs.writeFileSync(`output/${activeMessageArray[userId].id}.txt`, result);
-                    message = await interaction.fetchReply(loadActiveMessage(userId).id);
-                    message = await message.edit({ files: [`output/${message.id}.txt`], components: [row] });
-
-                    saveMessageId(userId, message.id);
-                    saveActiveMessage(userId, message);
-                    saveMessageLocation(message.id, channelId, guildId);
+                    oldMessage = await interaction.fetchReply(loadActiveMessage(userId).id);
+                    oldMessage.delete();
                 }
-                // channelB
+                // if the previous active message is in a different channel.
                 else {
-                    const oldChannel = client.channels.cache.get(loadMessageLocation(loadActiveMessage(userId).id).channelId);
-                    const oldMessage = await oldChannel.messages.fetch(loadActiveMessage(userId).id);
+                    oldChannel = client.channels.cache.get(loadMessageLocation(loadActiveMessage(userId).id).channelId);
+                    oldMessage = await oldChannel.messages.fetch(loadActiveMessage(userId).id);
                     await oldMessage.delete();
-
-                    message = await interaction.editReply("loading...");
-                    fs.writeFileSync(`output/${message.id}.txt`, result);
-                    message = await interaction.editReply({ content: "", files: [`output/${message.id}.txt`], components: [row] });
-
-                    saveMessageId(userId, message.id);
-                    saveActiveMessage(userId, message);
-                    saveMessageLocation(message.id, channelId, guildId);
                 }
             }
-            // initial message.
-            else {
-                message = await interaction.editReply("loading...");
-                fs.writeFileSync(`output/${message.id}.txt`, result);
-                message = await interaction.editReply({ content: "", files: [`output/${message.id}.txt`], components: [row] });
 
-                saveMessageId(userId, message.id);
-                saveActiveMessage(userId, message);
-                saveMessageLocation(message.id, channelId, guildId);
-            }
-            
+            message = await interaction.editReply("loading...");
+            fs.writeFileSync(`output/${message.id}.txt`, result);
+            message = await interaction.editReply({ content: "", files: [`output/${message.id}.txt`], components: [row] });
+
+            saveMessageId(userId, message.id);
+            saveActiveMessage(userId, message);
+            saveMessageLocation(message.id, channelId, guildId);
+
             // save the userId of the user who run the command.
             saveMessageAuthor(message.id, userId);
         } catch (err) {

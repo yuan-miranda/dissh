@@ -24,19 +24,22 @@ let lastBotMessage = {};
 let lastBotMessageNotDeleted = {};
 let lastOutputStream = {};
 
+// key: message id, value: { guildId, channelId }
+let messageLocationStreams = {};
+
 // create a new SSH session.
 async function createShellSession(uid, host, port, username, password) {
     return new Promise((resolve, reject) => {
-        const client = new ssh2.Client();
+        const shell = new ssh2.Client();
 
-        client.on('error', (err) => {
+        shell.on('error', (err) => {
             return reject(err);
         })
 
-        client.on('ready', () => {
+        shell.on('ready', () => {
             // save the credentials.
             saveShellCredentials(uid, { host, port, username, password }).then(() => {
-                return resolve(client);
+                return resolve(shell);
             }).catch((err) => {
                 return reject(err);
             });
@@ -77,9 +80,9 @@ async function connectShellSession(uid, credentials) {
         }
 
         // else if the user has no active SSH session, create a new one.
-        createShellSession(uid, credentials.host, credentials.port, credentials.username, credentials.password).then((client) => {
-            sshSessions[uid] = client;
-            return resolve(client);
+        createShellSession(uid, credentials.host, credentials.port, credentials.username, credentials.password).then((shell) => {
+            sshSessions[uid] = shell;
+            return resolve(shell);
 
         // if the input credentials are wrong, then try to load the credentials from the file and use it to connect.
         }).catch((err) => {
@@ -97,8 +100,8 @@ async function connectShellSession(uid, credentials) {
                     return reject('Error: SSH specified might not exist or is not accessible.');
                 }
                 loadShellCredentials(uid).then((credentials) => {
-                    connectShellSession(uid, credentials).then((client) => {
-                        return resolve(client);
+                    connectShellSession(uid, credentials).then((shell) => {
+                        return resolve(shell);
                     }).catch((err) => {
                         return reject(err);
                     });
@@ -115,13 +118,13 @@ async function connectShellSession(uid, credentials) {
 async function executeShellCommand(uid, command) {
     return new Promise(async (resolve, reject) => {
         const stripAnsi = await import('strip-ansi');
-        const client = sshSessions[uid];
+        const shell = sshSessions[uid];
 
         let output = '';
 
         if (!sshStreams[uid]) {
             sshStreams[uid] = await new Promise((resolve, reject) => {
-                client.shell((err, stream) => {
+                shell.shell((err, stream) => {
                     if (err) return reject(err);
                     return resolve(stream);
                 });
@@ -216,11 +219,13 @@ client.on('messageDelete', async (message) => {
         await unlink(`output/${message.id}.txt`);
         if (lastBotMessageNotDeleted[message.id]) {
             console.log("deleted old " + message.id);
+            delete messageLocationStreams[lastBotMessageNotDeleted[uid].id];
             delete lastBotMessageNotDeleted[message.id];
         }
         
         else if (lastBotMessage[interactionStreams[message.id]]) {
             console.log("deleted new " + message.id);
+            delete messageLocationStreams[lastBotMessage[uid].id];
             lastBotMessage[interactionStreams[message.id]] = null;
         }
     } catch (err) {} // do nothing, this only occurs when updating the message.
@@ -231,6 +236,8 @@ client.on('interactionCreate', async (interaction) => {
 
     const { commandName } = interaction;
     const uid = interaction.user.id;
+    const guild = interaction.guild;
+    const channel = interaction.channel;
 
     // avoid the bot from responding to itself.
     if (interaction.user.bot) return;
@@ -253,6 +260,7 @@ client.on('interactionCreate', async (interaction) => {
     else if (commandName === 'exit') {
         exitShellSession(uid).then( async (result) => {
             lastBotMessageNotDeleted[lastBotMessage[uid].id] = lastBotMessage[uid];
+            messageLocationStreams[lastBotMessageNotDeleted[uid].id] = { guildId: guild.id, channelId: channel.id };
             await writeFile(`output/${lastBotMessage[uid].id}.txt`, lastOutputStream[uid]);
             
             delete lastOutputStream[uid];
@@ -281,8 +289,8 @@ client.on('interactionCreate', async (interaction) => {
         
         const row = new ActionRowBuilder().addComponents(viewInText);
 
-        findShellSession(uid).then(async (client) => {
-            sshSessions[uid] = client;
+        findShellSession(uid).then(async (shell) => {
+            sshSessions[uid] = shell;
             try {
                 await interaction.deferReply();
                 let result = await executeShellCommand(uid, command);
@@ -291,20 +299,66 @@ client.on('interactionCreate', async (interaction) => {
                 // doesnt work when in another server or channel, obv because of
                 // different message id, anyway but ill still fix it.
 
-                if (lastBotMessage[uid]) {
-                    await interaction.deleteReply();
-                    await writeFile(`output/${lastBotMessage[uid].id}.txt`, result);
-                    const message = await interaction.fetchReply(lastBotMessage[uid].id);
-                    const messageUpdate = await message.edit({ files: [`output/${lastBotMessage[uid].id}.txt`], components: [row]});
-                    console.log("update " + message + " " + messageUpdate);
-                } else {
+
+                // user executed the command in serverA-channelA, then user move to serverA-channelB
+                // in serverA=channelA, store the messageLocationStreams[message.id] = { guildId: guild.id, channelId: channel.id }
+
+                // in serverA=channelB, delete the old message and file for it then, write on the new channel, store its informations.
+                // delete the messageLocationStreams[message.id], then create a new one with the updated values.
+
+                // note: comparing message ID is potentially used here.
+                // the bot can delete messages anywhere as long as it has a messageId: guildId, channelId
+
+                // if user changes server, serverB-channelA delete the old message from the old server, delete the messageLocationStreams[message.id]
+                // then make a new messageLocationStreams with the updated value. vice versa.
+
+                // same server interaction but different channel.
+                if (lastBotMessage[uid] && messageLocationStreams[lastBotMessage[uid].id]) {
+                    const guildId = messageLocationStreams[lastBotMessage[uid].id].guildId;
+                    const channelId = messageLocationStreams[lastBotMessage[uid].id].channelId;
+                    // same channel interaction.
+
+                    if (guildId === guild.id && channelId === channel.id) {
+                        await interaction.deleteReply();
+                        await writeFile(`output/${lastBotMessage[uid].id}.txt`, result);
+                        const message = await interaction.fetchReply(lastBotMessage[uid].id);
+                        await message.edit({ files: [`output/${lastBotMessage[uid].id}.txt`], components: [row]});
+                    }
+
+                    // different channel interaction.
+                    else if (guildId === guild.id && channelId !== channel.id) {
+
+                        const oldChannel = client.channels.cache.get(channelId);
+
+                        oldChannel.messages.fetch(lastBotMessage[uid].id)
+                            .then(async (message) => {
+                                
+                                await writeFile("output/placeholder.txt", result);
+                                const newMessage = await interaction.editReply({ files: ["output/placeholder.txt"], components: [row]});
+                                await unlink("output/placeholder.txt");
+                                await writeFile(`output/${newMessage.id}.txt`, result);
+
+                                // delete messageLocationStreams[lastBotMessage[uid].id];
+                                await message.delete();
+                                delete lastBotMessage[uid];
+                                lastBotMessage[uid] = newMessage;
+                                messageLocationStreams[lastBotMessage[uid].id] = { guildId: guild.id, channelId: channel.id };
+                            }).catch((err) => {
+                                console.log(err);
+                            });
+                    }
+                }
+                else {
                     await writeFile("output/placeholder.txt", result);
                     lastBotMessage[uid] = await interaction.editReply({ files: ["output/placeholder.txt"], components: [row]});
-                    console.log("new " + lastBotMessage[uid].id);
                     await unlink("output/placeholder.txt");
                     await writeFile(`output/${lastBotMessage[uid].id}.txt`, result);
+                    messageLocationStreams[lastBotMessage[uid].id] = { guildId: guild.id, channelId: channel.id };
                 }
 
+                // do the vice versa, also examine how messages nad obj are deleted.
+
+                
                 interactionStreams[lastBotMessage[uid].id] = uid;
 
             } catch (err) {

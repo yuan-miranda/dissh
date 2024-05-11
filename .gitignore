@@ -1,4 +1,4 @@
 src/.env
-node_modules
 src/data
 src/output
+node_modules

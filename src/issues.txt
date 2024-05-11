@@ -1,0 +1,6 @@
+running blank /ssh command might not "accurately" update the output
+
+
+config potential (log all the output or only the new one.)
+config potential (output limit, 1 - 32767 characters.)
+config potential (raw error message or predefined error message.)

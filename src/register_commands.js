@@ -44,13 +44,13 @@ const commands = [
     },
     {
         name: 'ssh',
-        description: 'Execute a command in the current SSH session.',
+        description: 'Execute a command in the current SSH session. (leave blank to update the output)',
         options: [
             {
                 name: 'command',
-                description: 'The command to execute.',
+                description: 'The command to execute. (leave blank to update the output)',
                 type: 3,
-                required: true
+                required: false
             }
         ]
     }

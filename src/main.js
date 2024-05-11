@@ -1,32 +1,28 @@
 const fs = require('fs');
 const ssh2 = require('ssh2');
 
-
-// store all the shell session.
+// store the ssh sessions.
 // key: uid, value: ssh2.Client()
-let shellSessionArray = {};
+let sshSessions = {};
 function saveSession(uid, session) {
-    shellSessionArray[uid] = session;
+    sshSessions[uid] = session;
 }
-function loadSession(uid) {
-    return shellSessionArray[uid];
+function getSession(uid) {
+    return sshSessions[uid];
 }
-function deleteSession(uid) {
-    delete shellSessionArray[uid];
+function removeSession(uid) {
+    delete sshSessions[uid];
 }
 
-// store all shell stream.
+// store the ssh connections.
 // key: uid, value: ssh2.Client().shell((stream))
-let shellStreamArray = {};
+let sshStreams = {};
 function saveStream(uid, stream) {
-    shellStreamArray[uid] = stream;
+    sshStreams[uid] = stream;
 }
-function loadStream(uid, session) {
+async function getStream(uid, session) {
     return new Promise((resolve, reject) => {
-        // return resolved immediately if stream already exists.
-        if (shellStreamArray[uid]) return resolve(shellStreamArray[uid]);
-
-        // else create a new stream
+        if (sshStreams[uid]) return resolve(sshStreams[uid]);
         session.shell((err, stream) => {
             if (err) return reject(err);
             saveStream(uid, stream);
@@ -34,226 +30,188 @@ function loadStream(uid, session) {
         });
     });
 }
-function deleteStream(uid) {
-    delete shellStreamArray[uid];
+function removeStream(uid) {
+    delete sshStreams[uid];
 }
 
-// store all the shell stream final output.
-// key: uid, value: string
-let shellStreamOutputArray = {};
+// store the last ssh stream output. (STDOUT)
+// key: uid, value: stream.on("data", (data.toString()))
+let sshStreamOutputs = {};
 function saveStreamOutput(uid, output) {
-    shellStreamOutputArray[uid] = output;
+    sshStreamOutputs[uid] = output;
 }
-function loadStreamOutput(uid) {
-    return shellStreamOutputArray[uid];
+function getStreamOutput(uid) {
+    return sshStreamOutputs[uid];
 }
-function deleteStreamOutput(uid) {
-    delete shellStreamOutputArray[uid];
-}
-
-// store all the messages after /exit was excuted.
-// key: message.id, value: message
-let oldMessageArray = {};
-function saveOldMessage(messageId, message) {
-    oldMessageArray[messageId] = message;
-}
-function loadOldMessage(messageId) {
-    return oldMessageArray[messageId];
-}
-function deleteOldMessage(messageId) {
-    delete oldMessageArray[messageId];
+function removeStreamOutput(uid) {
+    delete sshStreamOutputs[uid];
 }
 
-// store all the messages after /ssh was excuted.
-// key: uid, value: message
-let activeMessageArray = {};
-function saveActiveMessage(uid, message) {
-    activeMessageArray[uid] = message;
+// store the message contents after using /exit command.
+// key: messageId, value: messageObject
+let oldMessages = {};
+function saveOldMessage(messageId, messageObject) {
+    oldMessages[messageId] = messageObject;
 }
-function loadActiveMessage(uid) {
-    return activeMessageArray[uid];
+function getOldMessage(messageId) {
+    return oldMessages[messageId];
 }
-function deleteActiveMessage(uid) {
-    delete activeMessageArray[uid];
-}
-
-// store the location of each messages.
-// key: message.id, value: { channelId, guildId }
-let messageLocationArray = {};
-function saveMessageLocation(messageId, channelId, guildId) {
-    messageLocationArray[messageId] = { channelId, guildId };
-}
-function loadMessageLocation(messageId) {
-    return messageLocationArray[messageId];
-}
-function deleteMessageLocation(messageId) {
-    delete messageLocationArray[messageId];
+function removeOldMessage(messageId) {
+    delete oldMessages[messageId];
 }
 
-// store all the message id.
-// key: uid, value: message.id
-let messageIdArray = {};
-function saveMessageId(uid, messageId) {
-    if (!messageIdArray[uid]) messageIdArray[uid] = [];
-    messageIdArray[uid].push(messageId);
+// store the active message contents. (active ssh sessions)
+// key: uid, value: messageObject
+let activeMessages = {};
+function saveActiveMessage(uid, messageObject) {
+    activeMessages[uid] = messageObject;
 }
-function loadMessageId(uid) {
-    return messageIdArray[uid];
+function getActiveMessage(uid) {
+    return activeMessages[uid];
 }
-function deleteMessageId(uid, messageId) {
-    if (!messageIdArray[uid]) return;
-    const index = messageIdArray[uid].indexOf(messageId);
-    if (index > -1) messageIdArray[uid].splice(index, 1);
+function removeActiveMessage(uid) {
+    delete activeMessages[uid];
 }
 
-// store all the message author.
-// key: message.id, value: message.author.id
-let messageAuthorArray = {};
+// manage the credentials.
+function saveCredentials(uid, credentials) {
+    fs.writeFileSync(`./data/credentials/${uid}.json`, JSON.stringify(credentials));
+}
+function getCredentials(uid) {
+    if (!fs.existsSync(`./data/credentials/${uid}.json`)) return;
+    return JSON.parse(fs.readFileSync(`./data/credentials/${uid}.json`));
+}
+function removeCredentials(uid) {
+    if (!fs.existsSync(`./data/credentials/${uid}.json`)) return;
+    fs.unlinkSync(`./data/credentials/${uid}.json`);
+    return true;
+}
+
+// store the location of the message.
+// key: messageId, value: [channelId, serverId]
+let messageLocations = {};
+function saveMessageLocation(messageId, channelId, serverId) {
+    messageLocations[messageId] = { channelId: channelId, serverId: serverId };
+}
+function getMessageLocation(messageId) {
+    return messageLocations[messageId];
+}
+function removeMessageLocation(messageId) {
+    delete messageLocations[messageId];
+}
+
+// actually, the message is sent by the bot, the use of this is to keep track of the author and the
+// active messages that are deleted by the user or the others.
+// key: messageId, value: message.author.id
+let messageAuthor = {};
 function saveMessageAuthor(messageId, authorId) {
-    messageAuthorArray[messageId] = authorId;
+    messageAuthor[messageId] = authorId;
 }
-function loadMessageAuthor(messageId) {
-    return messageAuthorArray[messageId];
+function getMessageAuthor(messageId) {
+    return messageAuthor[messageId];
 }
-function deleteMessageAuthor(messageId) {
-    delete messageAuthorArray[messageId];
+function removeMessageAuthor(messageId) {
+    delete messageAuthor[messageId];
 }
 
-// store all the interaction (still down know if ill use this).
-let interactionArray = {};
-
-function createSession(uid, credentials) {
+// manage the ssh connections.
+async function createSession(uid, credentials) {
     return new Promise((resolve, reject) => {
         const session = new ssh2.Client();
-        
-        session.on("error", (err) => {
-            return reject(err);
-        });
-
-        session.on("ready", () => {
-            try {
-                saveCredentials(uid, credentials);
-                saveSession(uid, session);
-                return resolve(session);
-            } catch (err) {
-                return reject(err);
-            }
-        }).connect({
-            host: credentials.host,
-            port: credentials.port,
-            username: credentials.username,
-            password: credentials.password
-        });
+        session.once("error", (err) => { return reject(err); });
+        session.once("ready", () => {
+            saveSession(uid, session);
+            saveCredentials(uid, credentials);
+            return resolve(session);
+        }).connect(credentials);
     });
 }
-// hardcode if no credentials in discord part.
-// if there is, use this function to connect.
-async function connectShellSession(uid, credentials) {
+async function connectSession(uid, credentials) {
     return new Promise(async (resolve, reject) => {
-        let session = loadSession(uid);
-
-        // return immediately if session already exists.
-        if (session) return reject("Error: SSH session already exists.");
-
-        // create a new session if not exists.
+        if (getSession(uid)) return reject(new Error("Error: Already connected to the session."));
+        if (!credentials) return reject(new Error("Error: No credentials found."));
         try {
-            session = await createSession(uid, credentials);
-            saveSession(uid, session);
-            return resolve(session);
+            const newSession = await createSession(uid, credentials);
+            saveSession(uid, newSession);
+            return resolve(newSession);
         } catch (err) {
             if (err.message.includes('getaddrinfo ENOTFOUND')) {
-                return reject('Error: Invalid IP address.');
+                return reject(new Error("Error: Invalid IP address."));
             }
             else if (err.message.includes('connect ECONNREFUSED')) {
-                return reject('Error: Invalid Port, typically 8022 is used.');
+                return reject(new Error("Error: Invalid Port, typically 8022 is used or the shell is offline."));
             }
             else if (err.message.includes('All configured authentication methods failed')) {
-                return reject('Error: Invalid Username or Password.');
+                return reject(new Error("Error: Invalid Username or Password."));
             }
         }
     });
 }
-function disconnectSession(uid) {
-    return new Promise((resolve, reject) => {
-        const session = loadSession(uid);
-        if (!session) return reject("Error: No saved SSH session found.");
-
+async function disconnectSession(uid) {
+    return new Promise(async (resolve, reject) => {
+        const session = getSession(uid);
+        if (!session) return reject(new Error("Error: No active session found."));
         session.end();
-        deleteSession(uid);
-        return resolve("SSH session disconnected.");
+        removeSession(uid);
+        removeStream(uid);
+        removeStreamOutput(uid);
+        client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
+
+        if (getActiveMessage(uid)) {
+            saveOldMessage(getActiveMessage(uid).id, getActiveMessage(uid));
+            removeActiveMessage(uid);
+        }
+        return resolve("Successfully disconnected from the shell session.");
     });
 }
-
+// execute the command in the ssh session.
 async function executeCommand(uid, command) {
     return new Promise(async (resolve, reject) => {
         const stripAnsi = await import('strip-ansi');
-        const session = loadSession(uid);
-        let streamOutput = loadStreamOutput(uid) || "";
+        const session = getSession(uid);
+        if (!session) return reject(new Error("Error: No active session found."));
+        let streamOutput = getStreamOutput(uid) || "";
         let stream;
-        let output = "";
-        
-        if (!session) return reject(new Error("Error: No active SSH session found. Please use /sshd to start a new session."));
-
+        let outputStream = "";
+    
         try {
-            stream = await loadStream(uid, session)
+            stream = await getStream(uid, session);
         } catch (err) {
-            return reject(err)
-        }
-
-        stream.on("error", (err) => {
             return reject(err);
+        }
+    
+        stream.once("error", (err) => { return reject(err); });
+        stream.once("close", () => {
+            // fuck this method its not executing 'session.end()' once the session is offline for some reason.
+            // ill fix this later.
+            // hours wasted: 10
         });
-
         stream.on("data", (data) => {
-            output += stripAnsi.default(data.toString());
-            if (output.length >= 32767) {
-                output = output.substring(output.length - 32767);
-            }
-        })
+            outputStream += stripAnsi.default(data.toString());
+            if (outputStream.length >= 32767) outputStream = outputStream.substring(outputStream.length - 32767);
+        });
+        if (command) stream.write(`${command}\n`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-        stream.write(`${command}\n`);
-
-        setTimeout(() => {
-            streamOutput += output;
-            if (streamOutput.length >= 32767) {
-                streamOutput = streamOutput.substring(streamOutput.length - 32767);
-            }
-            saveStreamOutput(uid, streamOutput);
-            return resolve(streamOutput);
-        }, 1000);
-
-    });
+        stream.removeListener("data", () => {});
+        streamOutput += outputStream;
+        if (streamOutput.length >= 32767) streamOutput = streamOutput.substring(streamOutput.length - 32767);
+        saveStreamOutput(uid, streamOutput);
+        return resolve(streamOutput);
+    })
 }
 
-function saveCredentials(uid, credentials) {
-    try {
-        fs.writeFileSync(`data/${uid}.json`, JSON.stringify(credentials));
-        return true;
-    } catch (err) {
-        return false;
-    }
-}
-function loadShellCredentials(uid) {
-    try {
-        const data = fs.readFileSync(`data/${uid}.json`);
-        return JSON.parse(data);
-    } catch (err) {
-        return false;
-    }
-}
-function deleteCredentials(uid) {
-    try {
-        fs.unlinkSync(`data/${uid}.json`);
-        return true;
-    } catch (err) {
-        return false;
-    }
+// initialize the folders.
+function InitializeFolders() {
+    if (!fs.existsSync('./data')) fs.mkdirSync('./data');
+    if (!fs.existsSync('./data/credentials')) fs.mkdirSync('./data/credentials');
+    if (!fs.existsSync('./data/messages')) fs.mkdirSync('./data/messages');
 }
 
 /* ==================================================================================================== */
 // The following code is for the Discord bot.
 
-const { Client, GatewayIntentBits, ButtonBuilder, ActionRowBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, ButtonBuilder, ActionRowBuilder, ButtonStyle } = require('discord.js');
 require('dotenv').config();
 
 const client = new Client({
@@ -267,160 +225,118 @@ const client = new Client({
 
 client.once('ready', () => {
     console.log(`${client.user.tag} is online.`);
-    client.user.setActivity(`${Object.keys(shellSessionArray).length || 0} active session(s)`);
+    client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
+    if (!fs.existsSync('./data')) InitializeFolders();
 });
 
 client.on('messageCreate', async (message) => {
-    
 });
 
-client.on('messageDelete', async (message) => {
-    try {
-        // try to forcibly delete the file lmao.
-        fs.unlinkSync(`output/${message.id}.txt`);
-        
-        const authorId = loadMessageAuthor(message.id);
-        if (loadOldMessage(message.id)) {
-            deleteOldMessage(message.id);
-            deleteMessageLocation(message.id);
-            deleteMessageId(authorId, message.id);
-        }
-        else {
-            saveActiveMessage(authorId, null);
-            deleteMessageLocation(message.id);
-            deleteMessageId(authorId, message.id);
-        }
-    } catch (err) {
-        // ignore this, its just the deferReply being deleted.
-        console.log(err.message);
+client.on("messageDelete", async (message) => {
+    if (!fs.existsSync(`./data/messages/${message.id}.txt`)) return;
+    fs.unlinkSync(`./data/messages/${message.id}.txt`);
+    const uid = getMessageAuthor(message.id);
+    if (getOldMessage(message.id)) {
+        removeOldMessage(message.id);
+        removeMessageLocation(message.id);
+    }
+    else {
+        saveActiveMessage(uid, null);
+        removeMessageLocation(message.id);
     }
 });
 
-client.on('interactionCreate', async (interaction) => {
+client.on("interactionCreate", async (interaction) => {
     if (!interaction.isCommand() && !interaction.isButton()) return;
 
-    const { commandName } = interaction;
-    const userId = interaction.user.id;
-    const guildId = interaction.guild.id;
+    const { commandName, options } = interaction;
+    const uid = interaction.user.id;
     const channelId = interaction.channel.id;
+    const serverId = interaction.guild.id;
 
     // avoid the bot from responding to itself.
     if (interaction.user.bot) return;
 
     if (commandName === "sshd") {
-        const host = interaction.options.getString('host');
-        const port = interaction.options.getInteger('port');
-        const username = interaction.options.getString('username');
-        const password = interaction.options.getString('password');
-        
         await interaction.deferReply({ ephemeral: true });
+        const host = options.getString("host");
+        const port = options.getInteger("port");
+        const username = options.getString("username");
+        const password = options.getString("password");
 
         try {
             // try to auto login if no credentials provided.
-            if (!host && !port && !username && !password) {
-                const newCredentials = loadShellCredentials(userId);
-                await connectShellSession(userId, newCredentials);
-            }
-
-            // if credentials are provided, use it to connect.
-            else {
-                await connectShellSession(userId, { host, port, username, password });
-            }
-            await interaction.editReply("SSH session connected.");
-            client.user.setActivity(`${Object.keys(shellSessionArray).length || 0} active session(s)`);
-        } catch (err) {
-            await interaction.editReply(err);
-        }
-    }
-
-    else if (commandName === "exit") {
-        await interaction.deferReply({ ephemeral: true });
-        try {
-            const status = await disconnectSession(userId);
-            client.user.setActivity(`${Object.keys(shellSessionArray).length || 0} active session(s)`);
-            if (!loadActiveMessage(userId)) return await interaction.editReply(status);
-
-            deleteStream(userId);
-            deleteStreamOutput(userId);
-            saveOldMessage(loadActiveMessage(userId).id, loadActiveMessage(userId));
-            deleteActiveMessage(userId);
-            await interaction.editReply(status);
-        } catch (err) {
-            await interaction.editReply(err);
-        }
-    }
-
-    else if (commandName === "purge") {
-        await interaction.deferReply({ ephemeral: true });
-        if (!deleteCredentials(userId)) {
-            await interaction.editReply("Error: No saved credentials found.");
-        } else {
-            await interaction.editReply("Credentials purged.");
-        }
-    }
-
-    else if (commandName === "ssh") {
-        // currently doesnt place the message at the most recent.
-        const command = interaction.options.getString('command');
-        
-        const button = new ButtonBuilder()
-            .setCustomId("text_mode")
-            .setLabel("View in Text")
-            .setStyle("Primary");
-
-        const row = new ActionRowBuilder().addComponents(button);
-
-        // there's no currently the implementation of the deleted message view in text mode.
-        try {
-            await interaction.deferReply({ ephemeral: false});
-            const result = await executeCommand(userId, command);
-            let oldMessage;
-            let message;
-
-            // if there is an previous active message, delete it.
-            if (loadActiveMessage(userId)) {
-                // if the previous active message is in the same channel.
-                if (loadMessageLocation(activeMessageArray[userId].id).channelId === channelId) {
-                    oldMessage = await interaction.fetchReply(loadActiveMessage(userId).id);
-                    oldMessage.delete();
-                }
-                // if the previous active message is in a different channel.
-                else {
-                    oldChannel = client.channels.cache.get(loadMessageLocation(loadActiveMessage(userId).id).channelId);
-                    oldMessage = await oldChannel.messages.fetch(loadActiveMessage(userId).id);
-                    await oldMessage.delete();
-                }
-            }
-
-            message = await interaction.editReply("loading...");
-            fs.writeFileSync(`output/${message.id}.txt`, result);
-            message = await interaction.editReply({ content: "", files: [`output/${message.id}.txt`], components: [row] });
-
-            saveMessageId(userId, message.id);
-            saveActiveMessage(userId, message);
-            saveMessageLocation(message.id, channelId, guildId);
-
-            // save the userId of the user who run the command.
-            saveMessageAuthor(message.id, userId);
+            if (!host || !port || !username || !password) await connectSession(uid, getCredentials(uid));
+            else await connectSession(uid, { host, port, username, password });
+            await interaction.editReply("Successfully connected to the shell session.");
+            client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
         } catch (err) {
             await interaction.editReply(err.message);
         }
     }
-
-    // button interaction.
-    else if (interaction.isButton()) {
-        if (interaction.customId !== "text_mode") return;
+    else if (commandName === "ssh") {
+        const command = options.getString("command");
+        const button = new ButtonBuilder()
+            .setCustomId("text_view")
+            .setLabel("View in Text")
+            .setStyle(ButtonStyle.Primary);
+        const row = new ActionRowBuilder().addComponents(button);
 
         try {
+            await interaction.deferReply({ ephemeral: false });
+            const result = await executeCommand(uid, command);
+            let activeMessage = getActiveMessage(uid);
+            let oldMessage;
+            let message;
+
+            // check if the user has an active message, then replace the message if exists.
+            if (getActiveMessage(uid)) {
+                // check if the message is in the same channel.
+                if (getMessageLocation(activeMessage.id).channelId === channelId) {
+                    oldMessage = await interaction.fetchReply(activeMessage.id);
+                    oldMessage.delete();
+                }
+                // different channel, fetch the message from the channel, then replace it into the new channel.
+                else {
+                    oldMessage = client.channels.cache.get(getMessageLocation(activeMessage.id).channelId);
+                    oldMessage = await oldMessage.messages.fetch(activeMessage.id);
+                    oldMessage.delete();
+                }
+            }
+            message = await interaction.editReply("loading...");
+            fs.writeFileSync(`./data/messages/${message.id}.txt`, result);
+            message = await interaction.editReply({ content: "", files: [`./data/messages/${message.id}.txt`], components: [row] });
+
+            saveActiveMessage(uid, message);
+            saveMessageLocation(message.id, channelId, serverId);
+            saveMessageAuthor(message.id, uid);
+        } catch (err) {
+            await interaction.editReply(err.message);
+        }
+    }
+    else if (commandName === "exit") {
+        await interaction.deferReply({ ephemeral: true });
+        try {
+            const status = await disconnectSession(uid);
+            await interaction.editReply(status);
+        } catch (err) {
+            await interaction.editReply(err.message);
+        }
+    }
+    else if (commandName === "purge") {
+        await interaction.deferReply({ ephemeral: true });
+        if (!removeCredentials(uid)) await interaction.editReply("No credentials found.");
+        else await interaction.editReply("Successfully deleted the credentials.");
+    }
+    else if (interaction.isButton()) {
+        if (!interaction.customId === "text_view") return;
+        try {
             await interaction.deferReply({ ephemeral: true });
+            let content = fs.readFileSync(`./data/messages/${interaction.message.id}.txt`, "utf-8");
 
-            // read the content of the message file sent.
-            let content = fs.readFileSync(`output/${interaction.message.id}.txt`, 'utf8');
-
-            // limit the content to the last 1900 characters as for the discord token limit.
+            // limit the content to the last 1900 characters due to the discord send limit.
             if (content.length >= 2000) content = content.substring(content.length - 1900);
-
-            await interaction.editReply({ content: "```bash\n" + content + "```" });
+            await interaction.editReply({ content: `\`\`\`bash\n${content}\n\`\`\``});
         } catch (err) {
             await interaction.editReply(err.message);
         }

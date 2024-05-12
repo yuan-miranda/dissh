@@ -1,6 +1,31 @@
 const fs = require('fs');
 const ssh2 = require('ssh2');
 
+// possible error messages that can occur on this program
+const ssh2ErrorList = {
+    "Keepalive timeout": "Keepalive timeout",
+    "Timed out while waiting for handshake": "Timed out while waiting for handshake",
+    "getaddrinfo ENOTFOUND": "getaddrinfo ENOTFOUND",
+    "ECONNREFUSED": "ECONNREFUSED",
+    "ECONNRESET": "ECONNRESET",
+    "connect ECONNREFUSED": "connect ECONNREFUSED",
+    "All configured authentication methods failed": "All configured authentication methods failed",
+    "No response from server": "No response from server",
+}
+const programErrorList = {
+    "ALLREADY_CONNECTED": "Already connected to the session.",
+    "NOCREDENTIALS": "No saved credentials found.",
+    "INVALIDHOST": "IP address provided is invalid or does not exist.",
+    "INVALIDPORT": "Port number provided is invalid or the session is offline. default port is 22.",
+    "INVALIDPASSWORD": "Password provided is invalid.",
+    "NOACTIVESESSION": "No active session found.",
+    "OFFLINESESSION": "Session is offline.",
+    "CONNECTED": "Connected to the session.",
+    "DISCONNECTED": "Disconnected from the session.",
+    "CREDENTIALDELETED": "Credential deleted.",
+    "NORESPONSE": "Session did not respond.",
+}
+
 // store the ssh sessions.
 // key: uid, value: ssh2.Client()
 let sshSessions = {};
@@ -118,90 +143,108 @@ function removeMessageAuthor(messageId) {
 async function createSession(uid, credentials) {
     return new Promise((resolve, reject) => {
         const session = new ssh2.Client();
-        session.once("error", (err) => { return reject(err); });
+        session.once("error", async (err) => {
+            if (err.message === "Keepalive timeout") {
+                await disconnectSession(uid);
+                await client.users.fetch(uid).then(async (user) => user.send(programErrorList["DISCONNECTED"]));
+            }
+            else if (err.message === "Timed out while waiting for handshake") return reject(new Error(ssh2ErrorList["Timed out while waiting for handshake"]));
+            else return reject(err);
+            
+        });
+        session.once("end", async () => {
+            await client.users.fetch(uid).then(async (user) => user.send(programErrorList["DISCONNECTED"]));
+        });
         session.once("ready", () => {
             saveSession(uid, session);
             saveCredentials(uid, credentials);
             return resolve(session);
-        }).connect(credentials);
-    });
+        }).connect({
+            host: credentials.host,
+            port: credentials.port,
+            username: credentials.username,
+            password: credentials.password,
+            keepaliveInterval: 2000,
+        });
+    })
 }
 async function connectSession(uid, credentials) {
     return new Promise(async (resolve, reject) => {
-        if (getSession(uid)) return reject(new Error("Error: Already connected to the session."));
-        if (!credentials) return reject(new Error("Error: No credentials found."));
+        if (getSession(uid)) return reject(new Error("Already connected to the session."));
+        if (!credentials) return reject(new Error("No credentials found."));
         try {
             const newSession = await createSession(uid, credentials);
+            client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
             saveSession(uid, newSession);
             return resolve(newSession);
         } catch (err) {
             if (err.message.includes('getaddrinfo ENOTFOUND')) {
-                return reject(new Error("Error: Invalid IP address."));
+                return reject(new Error(ssh2ErrorList["getaddrinfo ENOTFOUND"]));
             }
             else if (err.message.includes('connect ECONNREFUSED')) {
-                return reject(new Error("Error: Invalid Port, typically 8022 is used or the shell is offline."));
+                return reject(new Error(ssh2ErrorList["connect ECONNREFUSED"]));
             }
             else if (err.message.includes('All configured authentication methods failed')) {
-                return reject(new Error("Error: Invalid Username or Password."));
+                return reject(new Error(ssh2ErrorList["All configured authentication methods failed"]));
             }
+            else return reject(err);
         }
     });
 }
 async function disconnectSession(uid) {
     return new Promise(async (resolve, reject) => {
         const session = getSession(uid);
-        if (!session) return reject(new Error("Error: No active session found."));
+        if (!session) return reject(new Error(programErrorList["NOACTIVESESSION"]));
         session.end();
         removeSession(uid);
         removeStream(uid);
         removeStreamOutput(uid);
         client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
-
+        
         if (getActiveMessage(uid)) {
             saveOldMessage(getActiveMessage(uid).id, getActiveMessage(uid));
             removeActiveMessage(uid);
         }
-        return resolve("Successfully disconnected from the shell session.");
+        return resolve();
     });
 }
+
 // execute the command in the ssh session.
 async function executeCommand(uid, command) {
     return new Promise(async (resolve, reject) => {
         const stripAnsi = await import('strip-ansi');
         const session = getSession(uid);
-        if (!session) return reject(new Error("Error: No active session found."));
+        if (!session) return reject(new Error(programErrorList["NOACTIVESESSION"]));
         let streamOutput = getStreamOutput(uid) || "";
         let stream;
         let outputStream = "";
-    
+
         try {
             stream = await getStream(uid, session);
         } catch (err) {
             return reject(err);
         }
-    
+
         stream.once("error", (err) => { return reject(err); });
-        stream.once("close", () => {
-            // fuck this method its not executing 'session.end()' once the session is offline for some reason.
-            // ill fix this later.
-            // hours wasted: 10
-        });
         stream.on("data", (data) => {
             outputStream += stripAnsi.default(data.toString());
-            if (outputStream.length >= 32767) outputStream = outputStream.substring(outputStream.length - 32767);
         });
         if (command) stream.write(`${command}\n`);
         await new Promise(resolve => setTimeout(resolve, 1000));
-
-        stream.removeListener("data", () => {});
+        if (outputStream.length === 0) {
+            // set a delay of 5 seconds to wait for the response. If no response is received, the program will
+            // assume that the session did not respond. This might also be followed by the session being offline
+            // if the session did not respond to the keepaliveInterval.
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            return reject(new Error(programErrorList["NORESPONSE"]))
+        }
         streamOutput += outputStream;
         if (streamOutput.length >= 32767) streamOutput = streamOutput.substring(streamOutput.length - 32767);
         saveStreamOutput(uid, streamOutput);
         return resolve(streamOutput);
-    })
+    });
 }
 
-// initialize the folders.
 function InitializeFolders() {
     if (!fs.existsSync('./data')) fs.mkdirSync('./data');
     if (!fs.existsSync('./data/credentials')) fs.mkdirSync('./data/credentials');
@@ -268,8 +311,7 @@ client.on("interactionCreate", async (interaction) => {
             // try to auto login if no credentials provided.
             if (!host || !port || !username || !password) await connectSession(uid, getCredentials(uid));
             else await connectSession(uid, { host, port, username, password });
-            await interaction.editReply("Successfully connected to the shell session.");
-            client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
+            await interaction.editReply(programErrorList["CONNECTED"]);
         } catch (err) {
             await interaction.editReply(err.message);
         }
@@ -318,15 +360,15 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
         try {
             const status = await disconnectSession(uid);
-            await interaction.editReply(status);
+            await interaction.editReply(programErrorList["DISCONNECTED"]);
         } catch (err) {
             await interaction.editReply(err.message);
         }
     }
     else if (commandName === "purge") {
         await interaction.deferReply({ ephemeral: true });
-        if (!removeCredentials(uid)) await interaction.editReply("No credentials found.");
-        else await interaction.editReply("Successfully deleted the credentials.");
+        if (!removeCredentials(uid)) await interaction.editReply(programErrorList["NOCREDENTIALS"])
+        else await interaction.editReply(programErrorList["CREDENTIALDELETED"]);
     }
     else if (interaction.isButton()) {
         if (!interaction.customId === "text_view") return;

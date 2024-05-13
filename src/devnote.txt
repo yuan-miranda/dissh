@@ -1,0 +1,18 @@
+issues:
+- running blank /ssh command might not "accurately" update the output
+- well I dont consider the losing connection like "read ECONNRESET" to be an issue, but it forcefully
+    disconnects the user on the shell, well I could reconnect anyway without using "screens" or "tmux"
+    on the server but I might also add that as an option for persistent sessions, just a very tedious
+    task lol.
+
+
+config potential:
+- log all the output till limit or only the new output.
+- output limit, 1 - 32767 characters.
+- raw error message or predefined error message.
+
+
+ideas:
+- thinking of constantly updating the output as long as data event occur.
+- I might implement the keyboard-interactive for the instance where the session needs the user input
+    but as I write this I have no idea how I would do it via discord bot lmao.

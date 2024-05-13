@@ -1,7 +1,7 @@
 const fs = require('fs');
 const ssh2 = require('ssh2');
 
-// possible error messages that can occur on this program
+// possible error messages that can occur on this program.
 const programErrorList = {
     "ALLREADYCONNECTED": "Already connected to the session.",
     "NOCREDENTIALS": "No saved credentials found.",
@@ -14,6 +14,12 @@ const programErrorList = {
     "CREDENTIALDELETED": "Credential deleted.",
     "NORESPONSE": "Session did not respond.",
     "SESSIONTIMEOUT": "Session took too long to connect.",
+}
+
+// get the current time.
+function getCurrentTime() {
+    const date = new Date();
+    return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()} ${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}`;
 }
 
 // store the ssh sessions.
@@ -39,10 +45,7 @@ async function getStream(uid, session) {
     return new Promise((resolve, reject) => {
         if (sshStreams[uid]) return resolve(sshStreams[uid]);
         session.shell((err, stream) => {
-            if (err) {
-                console.log("shell error: ", err.message);
-                return reject(err);
-            }
+            if (err) return reject(err);
             saveStream(uid, stream);
             return resolve(stream);
         });
@@ -92,6 +95,7 @@ function removeActiveMessage(uid) {
 }
 
 // manage the credentials.
+// key: uid, value: { host, port, username, password }
 function saveCredentials(uid, credentials) {
     fs.writeFileSync(`./data/credentials/${uid}.json`, JSON.stringify(credentials));
 }
@@ -137,21 +141,17 @@ async function createSession(uid, credentials) {
     return new Promise((resolve, reject) => {
         const session = new ssh2.Client();
         session.on("error", async (err) => {
-            console.log("session error: ", err.message);
             if (err.message === "Keepalive timeout" || err.message === "read ECONNRESET") {
                 await disconnectSession(uid);
-                await client.users.fetch(uid).then(async (user) => user.send(programErrorList["DISCONNECTED"]));
+                await client.users.fetch(uid).then(async (user) => user.send({ content: programErrorList["DISCONNECTED"], ephemeral: true}));
             }
             else if (err.message === "Timed out while waiting for handshake") return reject(new Error(programErrorList["SESSIONTIMEOUT"]));
             else if (err.message === "getaddrinfo ENOTFOUND") return reject(new Error(programErrorList["INVALIDHOST"]));
             else if (err.message === "connect ECONNREFUSED") return reject(new Error(programErrorList["INVALIDPORT"]));
             else if (err.message === 'All configured authentication methods failed') return reject(new Error(programErrorList["INVALIDPASSWORD"]));
             else return reject(err);
-            
         });
-        session.on("end", async () => {
-            await client.users.fetch(uid).then(async (user) => user.send(programErrorList["DISCONNECTED"]));
-        });
+        session.on("end", async () => { await client.users.fetch(uid).then(async (user) => user.send(programErrorList["DISCONNECTED"])); });
         session.once("ready", () => {
             saveSession(uid, session);
             saveCredentials(uid, credentials);
@@ -172,12 +172,13 @@ async function connectSession(uid, credentials) {
         if (!credentials) return reject(new Error(programErrorList["NOCREDENTIALS"]));
         try {
             const newSession = await createSession(uid, credentials);
+
             client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
+            client.users.fetch(uid).then(async (user) => console.log(`${getCurrentTime()} ${user.tag} connected to the session.`));
+
             saveSession(uid, newSession);
             return resolve(newSession);
-        } catch (err) {
-            return reject(err);
-        }
+        } catch (err) { return reject(err); }
     });
 }
 async function disconnectSession(uid) {
@@ -188,7 +189,9 @@ async function disconnectSession(uid) {
         removeSession(uid);
         removeStream(uid);
         removeStreamOutput(uid);
+
         client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
+        client.users.fetch(uid).then(async (user) => console.log(`${getCurrentTime()} ${user.tag} disconnected from the session.`));
         
         if (getActiveMessage(uid)) {
             saveOldMessage(getActiveMessage(uid).id, getActiveMessage(uid));
@@ -209,25 +212,15 @@ async function executeCommand(uid, command) {
         let outputStream = "";
         let timeout;
 
-        try {
-            stream = await getStream(uid, session);
-        } catch (err) {
-            console.log("stream catch error: ", err.message);
-            return reject(err);
-        }
+        try { stream = await getStream(uid, session);
+        } catch (err) { return reject(err); }
 
-        stream.on("error", (err) => {
-            console.log("stream error: ", err.message);
-            return reject(err);
-        });
+        stream.on("error", (err) => { return reject(err); });
         stream.on("data", (data) => {
             clearTimeout(timeout);
             outputStream += stripAnsi.default(data.toString());
         });
-        if (command) {
-            stream.write(`${command}\n`);
-            console.log("command written: ", command);
-        }
+        if (command) stream.write(`${command}\n`);
         await new Promise(resolve => setTimeout(resolve, 1000));
 
         // set a delay of 5 seconds to wait for the response. If no response is received, the program will
@@ -239,9 +232,7 @@ async function executeCommand(uid, command) {
                 if (outputStream.length === 0) timeout = setTimeout(() => { reject(new Error(programErrorList["NORESPONSE"])); }, 5000);
                 else resolve();
             })
-        } catch (err) {
-            return reject(err);
-        }
+        } catch (err) { return reject(err); }
 
         streamOutput += outputStream;
         if (streamOutput.length >= 32767) streamOutput = streamOutput.substring(streamOutput.length - 32767);
@@ -253,7 +244,7 @@ async function executeCommand(uid, command) {
 function InitializeFolders() {
     if (!fs.existsSync('./data')) fs.mkdirSync('./data');
     if (!fs.existsSync('./data/credentials')) fs.mkdirSync('./data/credentials');
-    if (!fs.existsSync('./data/messages')) fs.mkdirSync('./data/messages');
+    if (!fs.existsSync('./data/command_logs')) fs.mkdirSync('./data/command_logs');
 }
 
 /* ==================================================================================================== */
@@ -274,15 +265,15 @@ const client = new Client({
 client.once('ready', () => {
     console.log(`${client.user.tag} is online.`);
     client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
-    if (!fs.existsSync('./data')) InitializeFolders();
+    InitializeFolders();
 });
 
 client.on('messageCreate', async (message) => {
 });
 
 client.on("messageDelete", async (message) => {
-    if (!fs.existsSync(`./data/messages/${message.id}.txt`)) return;
-    fs.unlinkSync(`./data/messages/${message.id}.txt`);
+    if (!fs.existsSync(`./data/command_logs/${message.id}.txt`)) return;
+    fs.unlinkSync(`./data/command_logs/${message.id}.txt`);
     const uid = getMessageAuthor(message.id);
     if (getOldMessage(message.id)) {
         removeOldMessage(message.id);
@@ -313,13 +304,11 @@ client.on("interactionCreate", async (interaction) => {
         const password = options.getString("password");
 
         try {
-            // try to auto login if no credentials provided.
+            // use auto login if no credentials provided.
             if (!host || !port || !username || !password) await connectSession(uid, getCredentials(uid));
             else await connectSession(uid, { host, port, username, password });
             await interaction.editReply(programErrorList["CONNECTED"]);
-        } catch (err) {
-            await interaction.editReply(err.message);
-        }
+        } catch (err) { await interaction.editReply(err.message); }
     }
     else if (commandName === "ssh") {
         const command = options.getString("command");
@@ -351,24 +340,20 @@ client.on("interactionCreate", async (interaction) => {
                 }
             }
             message = await interaction.editReply("loading...");
-            fs.writeFileSync(`./data/messages/${message.id}.txt`, result);
-            message = await interaction.editReply({ content: "", files: [`./data/messages/${message.id}.txt`], components: [row] });
+            fs.writeFileSync(`./data/command_logs/${message.id}.txt`, result);
+            message = await interaction.editReply({ content: "", files: [`./data/command_logs/${message.id}.txt`], components: [row] });
 
             saveActiveMessage(uid, message);
             saveMessageLocation(message.id, channelId, serverId);
             saveMessageAuthor(message.id, uid);
-        } catch (err) {
-            await interaction.editReply(err.message);
-        }
+        } catch (err) { await interaction.editReply(err.message); }
     }
     else if (commandName === "exit") {
         await interaction.deferReply({ ephemeral: true });
         try {
-            const status = await disconnectSession(uid);
+            await disconnectSession(uid);
             await interaction.editReply(programErrorList["DISCONNECTED"]);
-        } catch (err) {
-            await interaction.editReply(err.message);
-        }
+        } catch (err) { await interaction.editReply(err.message); }
     }
     else if (commandName === "purge") {
         await interaction.deferReply({ ephemeral: true });
@@ -379,14 +364,12 @@ client.on("interactionCreate", async (interaction) => {
         if (!interaction.customId === "text_view") return;
         try {
             await interaction.deferReply({ ephemeral: true });
-            let content = fs.readFileSync(`./data/messages/${interaction.message.id}.txt`, "utf-8");
+            let content = fs.readFileSync(`./data/command_logs/${interaction.message.id}.txt`, "utf-8");
 
             // limit the content to the last 1900 characters due to the discord send limit.
             if (content.length >= 2000) content = content.substring(content.length - 1900);
             await interaction.editReply({ content: `\`\`\`bash\n${content}\n\`\`\``});
-        } catch (err) {
-            await interaction.editReply(err.message);
-        }
+        } catch (err) { await interaction.editReply(err.message); }
     }
 });
 

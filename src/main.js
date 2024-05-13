@@ -2,28 +2,18 @@ const fs = require('fs');
 const ssh2 = require('ssh2');
 
 // possible error messages that can occur on this program
-const ssh2ErrorList = {
-    "Keepalive timeout": "Keepalive timeout",
-    "Timed out while waiting for handshake": "Timed out while waiting for handshake",
-    "getaddrinfo ENOTFOUND": "getaddrinfo ENOTFOUND",
-    "ECONNREFUSED": "ECONNREFUSED",
-    "ECONNRESET": "ECONNRESET",
-    "connect ECONNREFUSED": "connect ECONNREFUSED",
-    "All configured authentication methods failed": "All configured authentication methods failed",
-    "No response from server": "No response from server",
-}
 const programErrorList = {
-    "ALLREADY_CONNECTED": "Already connected to the session.",
+    "ALLREADYCONNECTED": "Already connected to the session.",
     "NOCREDENTIALS": "No saved credentials found.",
     "INVALIDHOST": "IP address provided is invalid or does not exist.",
     "INVALIDPORT": "Port number provided is invalid or the session is offline. default port is 22.",
     "INVALIDPASSWORD": "Password provided is invalid.",
     "NOACTIVESESSION": "No active session found.",
-    "OFFLINESESSION": "Session is offline.",
     "CONNECTED": "Connected to the session.",
     "DISCONNECTED": "Disconnected from the session.",
     "CREDENTIALDELETED": "Credential deleted.",
     "NORESPONSE": "Session did not respond.",
+    "SESSIONTIMEOUT": "Session took too long to connect.",
 }
 
 // store the ssh sessions.
@@ -49,7 +39,10 @@ async function getStream(uid, session) {
     return new Promise((resolve, reject) => {
         if (sshStreams[uid]) return resolve(sshStreams[uid]);
         session.shell((err, stream) => {
-            if (err) return reject(err);
+            if (err) {
+                console.log("shell error: ", err.message);
+                return reject(err);
+            }
             saveStream(uid, stream);
             return resolve(stream);
         });
@@ -143,16 +136,20 @@ function removeMessageAuthor(messageId) {
 async function createSession(uid, credentials) {
     return new Promise((resolve, reject) => {
         const session = new ssh2.Client();
-        session.once("error", async (err) => {
-            if (err.message === "Keepalive timeout") {
+        session.on("error", async (err) => {
+            console.log("session error: ", err.message);
+            if (err.message === "Keepalive timeout" || err.message === "read ECONNRESET") {
                 await disconnectSession(uid);
                 await client.users.fetch(uid).then(async (user) => user.send(programErrorList["DISCONNECTED"]));
             }
-            else if (err.message === "Timed out while waiting for handshake") return reject(new Error(ssh2ErrorList["Timed out while waiting for handshake"]));
+            else if (err.message === "Timed out while waiting for handshake") return reject(new Error(programErrorList["SESSIONTIMEOUT"]));
+            else if (err.message === "getaddrinfo ENOTFOUND") return reject(new Error(programErrorList["INVALIDHOST"]));
+            else if (err.message === "connect ECONNREFUSED") return reject(new Error(programErrorList["INVALIDPORT"]));
+            else if (err.message === 'All configured authentication methods failed') return reject(new Error(programErrorList["INVALIDPASSWORD"]));
             else return reject(err);
             
         });
-        session.once("end", async () => {
+        session.on("end", async () => {
             await client.users.fetch(uid).then(async (user) => user.send(programErrorList["DISCONNECTED"]));
         });
         session.once("ready", () => {
@@ -164,30 +161,22 @@ async function createSession(uid, credentials) {
             port: credentials.port,
             username: credentials.username,
             password: credentials.password,
-            keepaliveInterval: 2000,
+            keepaliveInterval: 100, // keepalive seems to be useless when "read ECONNRESET" occurs.
+            keepaliveCountMax: 160
         });
     })
 }
 async function connectSession(uid, credentials) {
     return new Promise(async (resolve, reject) => {
-        if (getSession(uid)) return reject(new Error("Already connected to the session."));
-        if (!credentials) return reject(new Error("No credentials found."));
+        if (getSession(uid)) return reject(new Error(programErrorList["ALLREADYCONNECTED"]));
+        if (!credentials) return reject(new Error(programErrorList["NOCREDENTIALS"]));
         try {
             const newSession = await createSession(uid, credentials);
             client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
             saveSession(uid, newSession);
             return resolve(newSession);
         } catch (err) {
-            if (err.message.includes('getaddrinfo ENOTFOUND')) {
-                return reject(new Error(ssh2ErrorList["getaddrinfo ENOTFOUND"]));
-            }
-            else if (err.message.includes('connect ECONNREFUSED')) {
-                return reject(new Error(ssh2ErrorList["connect ECONNREFUSED"]));
-            }
-            else if (err.message.includes('All configured authentication methods failed')) {
-                return reject(new Error(ssh2ErrorList["All configured authentication methods failed"]));
-            }
-            else return reject(err);
+            return reject(err);
         }
     });
 }
@@ -218,26 +207,42 @@ async function executeCommand(uid, command) {
         let streamOutput = getStreamOutput(uid) || "";
         let stream;
         let outputStream = "";
+        let timeout;
 
         try {
             stream = await getStream(uid, session);
         } catch (err) {
+            console.log("stream catch error: ", err.message);
             return reject(err);
         }
 
-        stream.once("error", (err) => { return reject(err); });
+        stream.on("error", (err) => {
+            console.log("stream error: ", err.message);
+            return reject(err);
+        });
         stream.on("data", (data) => {
+            clearTimeout(timeout);
             outputStream += stripAnsi.default(data.toString());
         });
-        if (command) stream.write(`${command}\n`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        if (outputStream.length === 0) {
-            // set a delay of 5 seconds to wait for the response. If no response is received, the program will
-            // assume that the session did not respond. This might also be followed by the session being offline
-            // if the session did not respond to the keepaliveInterval.
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            return reject(new Error(programErrorList["NORESPONSE"]))
+        if (command) {
+            stream.write(`${command}\n`);
+            console.log("command written: ", command);
         }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // set a delay of 5 seconds to wait for the response. If no response is received, the program will
+        // assume that the session did not respond. This might also be followed by the session being offline
+        // if the session did not respond to the keepaliveInterval.
+        try {
+            await new Promise((resolve, reject) => {
+                // this will be omitted if the session did not respond and didnt throw "read ECONNRESET".
+                if (outputStream.length === 0) timeout = setTimeout(() => { reject(new Error(programErrorList["NORESPONSE"])); }, 5000);
+                else resolve();
+            })
+        } catch (err) {
+            return reject(err);
+        }
+
         streamOutput += outputStream;
         if (streamOutput.length >= 32767) streamOutput = streamOutput.substring(streamOutput.length - 32767);
         saveStreamOutput(uid, streamOutput);

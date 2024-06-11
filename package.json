@@ -2,6 +2,7 @@
   "dependencies": {
     "discord.js": "^14.15.2",
     "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
     "ssh2": "^1.15.0",
     "strip-ansi": "^7.1.0",
     "undici-types": "^6.9.0"

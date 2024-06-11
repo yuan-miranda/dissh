@@ -1,8 +1,9 @@
 const fs = require('fs');
 const ssh2 = require('ssh2');
+const cron = require('node-cron');
 
 // possible error messages that can occur on this program.
-const programErrorList = {
+const programMessageLists = {
     "ALLREADYCONNECTED": "Already connected to the session.",
     "NOCREDENTIALS": "No saved credentials found.",
     "INVALIDHOST": "IP address provided is invalid or does not exist.",
@@ -17,6 +18,7 @@ const programErrorList = {
 }
 
 // get the current time.
+// YYYY:MM:DD HH:MM:SS
 function getCurrentTime() {
     const date = new Date();
     return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()} ${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}`;
@@ -25,19 +27,111 @@ function getCurrentTime() {
 // store the ssh sessions.
 // key: uid, value: ssh2.Client()
 let sshSessions = {};
-function saveSession(uid, session) {
-    sshSessions[uid] = session;
-}
-function getSession(uid) {
-    return sshSessions[uid];
-}
-function removeSession(uid) {
-    delete sshSessions[uid];
-}
 
 // store the ssh connections.
 // key: uid, value: ssh2.Client().shell((stream))
 let sshStreams = {};
+
+// store the last ssh stream output. (STDOUT)
+// key: uid, value: stream.on("data", (data.toString()))
+let sshStreamOutputs = {};
+
+// store the message contents after using /exit command.
+// key: messageId, value: messageObject
+let oldMessages = {};
+
+// store the active message contents. (active ssh sessions)
+// key: uid, value: messageObject
+let activeMessages = {};
+
+// store the location of the message.
+// key: messageId, value: [channelId, serverId]
+let messageLocations = {};
+
+// actually, the message is sent by the bot, the use of this is to keep track of the author and the
+// active messages that are deleted by the user or the others.
+// key: messageId, value: message.author.id
+let messageAuthor = {};
+
+function saveVariables() {
+    console.log(`${getCurrentTime()} autosaving data.`);
+    fs.writeFileSync('./data/sshSessions.json', JSON.stringify(sshSessions));
+    fs.writeFileSync('./data/sshStreams.json', JSON.stringify(sshStreams));
+    fs.writeFileSync('./data/sshStreamOutputs.json', JSON.stringify(sshStreamOutputs));
+    fs.writeFileSync('./data/oldMessages.json', JSON.stringify(oldMessages));
+    fs.writeFileSync('./data/activeMessages.json', JSON.stringify(activeMessages));
+    fs.writeFileSync('./data/messageLocations.json', JSON.stringify(messageLocations));
+    fs.writeFileSync('./data/messageAuthor.json', JSON.stringify(messageAuthor));
+}
+
+function loadVariables() {
+    console.log(`${getCurrentTime()} loading data`);
+    if (fs.existsSync('./data/sshSessions.json')) sshSessions = JSON.parse(fs.readFileSync('./data/sshSessions.json'));
+    if (fs.existsSync('./data/sshStreams.json')) sshStreams = JSON.parse(fs.readFileSync('./data/sshStreams.json'));
+    if (fs.existsSync('./data/sshStreamOutputs.json')) sshStreamOutputs = JSON.parse(fs.readFileSync('./data/sshStreamOutputs.json'));
+    if (fs.existsSync('./data/oldMessages.json')) oldMessages = JSON.parse(fs.readFileSync('./data/oldMessages.json'));
+    if (fs.existsSync('./data/activeMessages.json')) activeMessages = JSON.parse(fs.readFileSync('./data/activeMessages.json'));
+    if (fs.existsSync('./data/messageLocations.json')) messageLocations = JSON.parse(fs.readFileSync('./data/messageLocations.json'));
+    if (fs.existsSync('./data/messageAuthor.json')) messageAuthor = JSON.parse(fs.readFileSync('./data/messageAuthor.json'));
+}
+
+function saveMessageAuthor(messageId, authorId) {
+    messageAuthor[messageId] = authorId;
+}
+function getMessageAuthor(messageId) {
+    return messageAuthor[messageId];
+}
+// function removeMessageAuthor(messageId) {
+//     delete messageAuthor[messageId];
+// }
+function saveMessageLocation(messageId, channelId, serverId) {
+    messageLocations[messageId] = { channelId: channelId, serverId: serverId };
+}
+function getMessageLocation(messageId) {
+    return messageLocations[messageId];
+}
+function removeMessageLocation(messageId) {
+    delete messageLocations[messageId];
+}
+function saveCredentials(uid, credentials) {
+    fs.writeFileSync(`./data/credentials/${uid}.json`, JSON.stringify(credentials));
+}
+function getCredentials(uid) {
+    if (!fs.existsSync(`./data/credentials/${uid}.json`)) return;
+    return JSON.parse(fs.readFileSync(`./data/credentials/${uid}.json`));
+}
+function removeCredentials(uid) {
+    if (!fs.existsSync(`./data/credentials/${uid}.json`)) return;
+    fs.unlinkSync(`./data/credentials/${uid}.json`);
+    return true;
+}
+function saveActiveMessage(uid, messageObject) {
+    activeMessages[uid] = messageObject;
+}
+function getActiveMessage(uid) {
+    return activeMessages[uid];
+}
+function removeActiveMessage(uid) {
+    delete activeMessages[uid];
+}
+function saveOldMessage(messageId, messageObject) {
+    oldMessages[messageId] = messageObject;
+}
+function getOldMessage(messageId) {
+    return oldMessages[messageId];
+}
+function removeOldMessage(messageId) {
+    delete oldMessages[messageId];
+}
+function saveStreamOutput(uid, output) {
+    sshStreamOutputs[uid] = output;
+}
+function getStreamOutput(uid) {
+    return sshStreamOutputs[uid];
+}
+function removeStreamOutput(uid) {
+    delete sshStreamOutputs[uid];
+}
 function saveStream(uid, stream) {
     sshStreams[uid] = stream;
 }
@@ -54,87 +148,16 @@ async function getStream(uid, session) {
 function removeStream(uid) {
     delete sshStreams[uid];
 }
-
-// store the last ssh stream output. (STDOUT)
-// key: uid, value: stream.on("data", (data.toString()))
-let sshStreamOutputs = {};
-function saveStreamOutput(uid, output) {
-    sshStreamOutputs[uid] = output;
+function saveSession(uid, session) {
+    sshSessions[uid] = session;
 }
-function getStreamOutput(uid) {
-    return sshStreamOutputs[uid];
+function getSession(uid) {
+    return sshSessions[uid];
 }
-function removeStreamOutput(uid) {
-    delete sshStreamOutputs[uid];
+function removeSession(uid) {
+    delete sshSessions[uid];
 }
 
-// store the message contents after using /exit command.
-// key: messageId, value: messageObject
-let oldMessages = {};
-function saveOldMessage(messageId, messageObject) {
-    oldMessages[messageId] = messageObject;
-}
-function getOldMessage(messageId) {
-    return oldMessages[messageId];
-}
-function removeOldMessage(messageId) {
-    delete oldMessages[messageId];
-}
-
-// store the active message contents. (active ssh sessions)
-// key: uid, value: messageObject
-let activeMessages = {};
-function saveActiveMessage(uid, messageObject) {
-    activeMessages[uid] = messageObject;
-}
-function getActiveMessage(uid) {
-    return activeMessages[uid];
-}
-function removeActiveMessage(uid) {
-    delete activeMessages[uid];
-}
-
-// manage the credentials.
-// key: uid, value: { host, port, username, password }
-function saveCredentials(uid, credentials) {
-    fs.writeFileSync(`./data/credentials/${uid}.json`, JSON.stringify(credentials));
-}
-function getCredentials(uid) {
-    if (!fs.existsSync(`./data/credentials/${uid}.json`)) return;
-    return JSON.parse(fs.readFileSync(`./data/credentials/${uid}.json`));
-}
-function removeCredentials(uid) {
-    if (!fs.existsSync(`./data/credentials/${uid}.json`)) return;
-    fs.unlinkSync(`./data/credentials/${uid}.json`);
-    return true;
-}
-
-// store the location of the message.
-// key: messageId, value: [channelId, serverId]
-let messageLocations = {};
-function saveMessageLocation(messageId, channelId, serverId) {
-    messageLocations[messageId] = { channelId: channelId, serverId: serverId };
-}
-function getMessageLocation(messageId) {
-    return messageLocations[messageId];
-}
-function removeMessageLocation(messageId) {
-    delete messageLocations[messageId];
-}
-
-// actually, the message is sent by the bot, the use of this is to keep track of the author and the
-// active messages that are deleted by the user or the others.
-// key: messageId, value: message.author.id
-let messageAuthor = {};
-function saveMessageAuthor(messageId, authorId) {
-    messageAuthor[messageId] = authorId;
-}
-function getMessageAuthor(messageId) {
-    return messageAuthor[messageId];
-}
-function removeMessageAuthor(messageId) {
-    delete messageAuthor[messageId];
-}
 
 // manage the ssh connections.
 async function createSession(uid, credentials) {
@@ -143,15 +166,15 @@ async function createSession(uid, credentials) {
         session.on("error", async (err) => {
             if (err.message === "Keepalive timeout" || err.message === "read ECONNRESET") {
                 await disconnectSession(uid);
-                await client.users.fetch(uid).then(async (user) => user.send({ content: programErrorList["DISCONNECTED"], ephemeral: true}));
+                await client.users.fetch(uid).then(async (user) => user.send({ content: programMessageLists["DISCONNECTED"], ephemeral: true}));
             }
-            else if (err.message === "Timed out while waiting for handshake") return reject(new Error(programErrorList["SESSIONTIMEOUT"]));
-            else if (err.message === "getaddrinfo ENOTFOUND") return reject(new Error(programErrorList["INVALIDHOST"]));
-            else if (err.message === "connect ECONNREFUSED") return reject(new Error(programErrorList["INVALIDPORT"]));
-            else if (err.message === 'All configured authentication methods failed') return reject(new Error(programErrorList["INVALIDPASSWORD"]));
+            else if (err.message === "Timed out while waiting for handshake") return reject(new Error(programMessageLists["SESSIONTIMEOUT"]));
+            else if (err.message === "getaddrinfo ENOTFOUND") return reject(new Error(programMessageLists["INVALIDHOST"]));
+            else if (err.message === "connect ECONNREFUSED") return reject(new Error(programMessageLists["INVALIDPORT"]));
+            else if (err.message === 'All configured authentication methods failed') return reject(new Error(programMessageLists["INVALIDPASSWORD"]));
             else return reject(err);
         });
-        session.on("end", async () => { await client.users.fetch(uid).then(async (user) => user.send(programErrorList["DISCONNECTED"])); });
+        session.on("end", async () => { await client.users.fetch(uid).then(async (user) => user.send(programMessageLists["DISCONNECTED"])); });
         session.once("ready", () => {
             saveSession(uid, session);
             saveCredentials(uid, credentials);
@@ -168,8 +191,8 @@ async function createSession(uid, credentials) {
 }
 async function connectSession(uid, credentials) {
     return new Promise(async (resolve, reject) => {
-        if (getSession(uid)) return reject(new Error(programErrorList["ALLREADYCONNECTED"]));
-        if (!credentials) return reject(new Error(programErrorList["NOCREDENTIALS"]));
+        if (getSession(uid)) return reject(new Error(programMessageLists["ALLREADYCONNECTED"]));
+        if (!credentials) return reject(new Error(programMessageLists["NOCREDENTIALS"]));
         try {
             const newSession = await createSession(uid, credentials);
 
@@ -184,7 +207,7 @@ async function connectSession(uid, credentials) {
 async function disconnectSession(uid) {
     return new Promise(async (resolve, reject) => {
         const session = getSession(uid);
-        if (!session) return reject(new Error(programErrorList["NOACTIVESESSION"]));
+        if (!session) return reject(new Error(programMessageLists["NOACTIVESESSION"]));
         session.end();
         removeSession(uid);
         removeStream(uid);
@@ -206,7 +229,7 @@ async function executeCommand(uid, command) {
     return new Promise(async (resolve, reject) => {
         const stripAnsi = await import('strip-ansi');
         const session = getSession(uid);
-        if (!session) return reject(new Error(programErrorList["NOACTIVESESSION"]));
+        if (!session) return reject(new Error(programMessageLists["NOACTIVESESSION"]));
         let streamOutput = getStreamOutput(uid) || "";
         let stream;
         let outputStream = "";
@@ -229,7 +252,7 @@ async function executeCommand(uid, command) {
         try {
             await new Promise((resolve, reject) => {
                 // this will be omitted if the session did not respond and didnt throw "read ECONNRESET".
-                if (outputStream.length === 0) timeout = setTimeout(() => { reject(new Error(programErrorList["NORESPONSE"])); }, 5000);
+                if (outputStream.length === 0) timeout = setTimeout(() => { reject(new Error(programMessageLists["NORESPONSE"])); }, 5000);
                 else resolve();
             })
         } catch (err) { return reject(err); }
@@ -265,7 +288,12 @@ const client = new Client({
 client.once('ready', () => {
     console.log(`${client.user.tag} is online.`);
     client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
+    
     InitializeFolders();
+    loadVariables();
+
+    // evry 1 minute, save the variables.
+    cron.schedule("*/1 * * * *", () => { saveVariables(); });
 });
 
 client.on('messageCreate', async (message) => {
@@ -307,7 +335,7 @@ client.on("interactionCreate", async (interaction) => {
             // use auto login if no credentials provided.
             if (!host || !port || !username || !password) await connectSession(uid, getCredentials(uid));
             else await connectSession(uid, { host, port, username, password });
-            await interaction.editReply(programErrorList["CONNECTED"]);
+            await interaction.editReply(programMessageLists["CONNECTED"]);
         } catch (err) { await interaction.editReply(err.message); }
     }
     else if (commandName === "ssh") {
@@ -352,13 +380,13 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
         try {
             await disconnectSession(uid);
-            await interaction.editReply(programErrorList["DISCONNECTED"]);
+            await interaction.editReply(programMessageLists["DISCONNECTED"]);
         } catch (err) { await interaction.editReply(err.message); }
     }
     else if (commandName === "purge") {
         await interaction.deferReply({ ephemeral: true });
-        if (!removeCredentials(uid)) await interaction.editReply(programErrorList["NOCREDENTIALS"])
-        else await interaction.editReply(programErrorList["CREDENTIALDELETED"]);
+        if (!removeCredentials(uid)) await interaction.editReply(programMessageLists["NOCREDENTIALS"])
+        else await interaction.editReply(programMessageLists["CREDENTIALDELETED"]);
     }
     else if (interaction.isButton()) {
         if (!interaction.customId === "text_view") return;

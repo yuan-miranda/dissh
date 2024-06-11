@@ -55,24 +55,24 @@ let messageAuthor = {};
 
 function saveVariables() {
     console.log(`${getCurrentTime()} autosaving data.`);
-    fs.writeFileSync('./data/sshSessions.json', JSON.stringify(sshSessions));
-    fs.writeFileSync('./data/sshStreams.json', JSON.stringify(sshStreams));
-    fs.writeFileSync('./data/sshStreamOutputs.json', JSON.stringify(sshStreamOutputs));
-    fs.writeFileSync('./data/oldMessages.json', JSON.stringify(oldMessages));
-    fs.writeFileSync('./data/activeMessages.json', JSON.stringify(activeMessages));
-    fs.writeFileSync('./data/messageLocations.json', JSON.stringify(messageLocations));
-    fs.writeFileSync('./data/messageAuthor.json', JSON.stringify(messageAuthor));
+    fs.writeFileSync('data/sshSessions.json', JSON.stringify(sshSessions));
+    fs.writeFileSync('data/sshStreams.json', JSON.stringify(sshStreams));
+    fs.writeFileSync('data/sshStreamOutputs.json', JSON.stringify(sshStreamOutputs));
+    fs.writeFileSync('data/oldMessages.json', JSON.stringify(oldMessages));
+    fs.writeFileSync('data/activeMessages.json', JSON.stringify(activeMessages));
+    fs.writeFileSync('data/messageLocations.json', JSON.stringify(messageLocations));
+    fs.writeFileSync('data/messageAuthor.json', JSON.stringify(messageAuthor));
 }
 
 function loadVariables() {
     console.log(`${getCurrentTime()} loading data`);
-    if (fs.existsSync('./data/sshSessions.json')) sshSessions = JSON.parse(fs.readFileSync('./data/sshSessions.json'));
-    if (fs.existsSync('./data/sshStreams.json')) sshStreams = JSON.parse(fs.readFileSync('./data/sshStreams.json'));
-    if (fs.existsSync('./data/sshStreamOutputs.json')) sshStreamOutputs = JSON.parse(fs.readFileSync('./data/sshStreamOutputs.json'));
-    if (fs.existsSync('./data/oldMessages.json')) oldMessages = JSON.parse(fs.readFileSync('./data/oldMessages.json'));
-    if (fs.existsSync('./data/activeMessages.json')) activeMessages = JSON.parse(fs.readFileSync('./data/activeMessages.json'));
-    if (fs.existsSync('./data/messageLocations.json')) messageLocations = JSON.parse(fs.readFileSync('./data/messageLocations.json'));
-    if (fs.existsSync('./data/messageAuthor.json')) messageAuthor = JSON.parse(fs.readFileSync('./data/messageAuthor.json'));
+    if (fs.existsSync('data/sshSessions.json')) sshSessions = JSON.parse(fs.readFileSync('data/sshSessions.json'));
+    if (fs.existsSync('data/sshStreams.json')) sshStreams = JSON.parse(fs.readFileSync('data/sshStreams.json'));
+    if (fs.existsSync('data/sshStreamOutputs.json')) sshStreamOutputs = JSON.parse(fs.readFileSync('data/sshStreamOutputs.json'));
+    if (fs.existsSync('data/oldMessages.json')) oldMessages = JSON.parse(fs.readFileSync('data/oldMessages.json'));
+    if (fs.existsSync('data/activeMessages.json')) activeMessages = JSON.parse(fs.readFileSync('data/activeMessages.json'));
+    if (fs.existsSync('data/messageLocations.json')) messageLocations = JSON.parse(fs.readFileSync('data/messageLocations.json'));
+    if (fs.existsSync('data/messageAuthor.json')) messageAuthor = JSON.parse(fs.readFileSync('data/messageAuthor.json'));
 }
 
 function saveMessageAuthor(messageId, authorId) {
@@ -94,15 +94,15 @@ function removeMessageLocation(messageId) {
     delete messageLocations[messageId];
 }
 function saveCredentials(uid, credentials) {
-    fs.writeFileSync(`./data/credentials/${uid}.json`, JSON.stringify(credentials));
+    fs.writeFileSync(`data/credentials/${uid}.json`, JSON.stringify(credentials));
 }
 function getCredentials(uid) {
-    if (!fs.existsSync(`./data/credentials/${uid}.json`)) return;
-    return JSON.parse(fs.readFileSync(`./data/credentials/${uid}.json`));
+    if (!fs.existsSync(`data/credentials/${uid}.json`)) return;
+    return JSON.parse(fs.readFileSync(`data/credentials/${uid}.json`));
 }
 function removeCredentials(uid) {
-    if (!fs.existsSync(`./data/credentials/${uid}.json`)) return;
-    fs.unlinkSync(`./data/credentials/${uid}.json`);
+    if (!fs.existsSync(`data/credentials/${uid}.json`)) return;
+    fs.unlinkSync(`data/credentials/${uid}.json`);
     return true;
 }
 function saveActiveMessage(uid, messageObject) {
@@ -265,9 +265,9 @@ async function executeCommand(uid, command) {
 }
 
 function InitializeFolders() {
-    if (!fs.existsSync('./data')) fs.mkdirSync('./data');
-    if (!fs.existsSync('./data/credentials')) fs.mkdirSync('./data/credentials');
-    if (!fs.existsSync('./data/command_logs')) fs.mkdirSync('./data/command_logs');
+    if (!fs.existsSync('data')) fs.mkdirSync('data');
+    if (!fs.existsSync('data/credentials')) fs.mkdirSync('data/credentials');
+    if (!fs.existsSync('data/command_logs')) fs.mkdirSync('data/command_logs');
 }
 
 /* ==================================================================================================== */
@@ -300,8 +300,8 @@ client.on('messageCreate', async (message) => {
 });
 
 client.on("messageDelete", async (message) => {
-    if (!fs.existsSync(`./data/command_logs/${message.id}.txt`)) return;
-    fs.unlinkSync(`./data/command_logs/${message.id}.txt`);
+    if (!fs.existsSync(`data/command_logs/${message.id}.txt`)) return;
+    fs.unlinkSync(`data/command_logs/${message.id}.txt`);
     const uid = getMessageAuthor(message.id);
     if (getOldMessage(message.id)) {
         removeOldMessage(message.id);
@@ -368,8 +368,8 @@ client.on("interactionCreate", async (interaction) => {
                 }
             }
             message = await interaction.editReply("loading...");
-            fs.writeFileSync(`./data/command_logs/${message.id}.txt`, result);
-            message = await interaction.editReply({ content: "", files: [`./data/command_logs/${message.id}.txt`], components: [row] });
+            fs.writeFileSync(`data/command_logs/${message.id}.txt`, result);
+            message = await interaction.editReply({ content: "", files: [`data/command_logs/${message.id}.txt`], components: [row] });
 
             saveActiveMessage(uid, message);
             saveMessageLocation(message.id, channelId, serverId);
@@ -392,7 +392,7 @@ client.on("interactionCreate", async (interaction) => {
         if (!interaction.customId === "text_view") return;
         try {
             await interaction.deferReply({ ephemeral: true });
-            let content = fs.readFileSync(`./data/command_logs/${interaction.message.id}.txt`, "utf-8");
+            let content = fs.readFileSync(`data/command_logs/${interaction.message.id}.txt`, "utf-8");
 
             // limit the content to the last 1900 characters due to the discord send limit.
             if (content.length >= 2000) content = content.substring(content.length - 1900);

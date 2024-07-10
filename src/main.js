@@ -1,6 +1,7 @@
 const fs = require('fs');
 const ssh2 = require('ssh2');
 const cron = require('node-cron');
+require("dotenv").config({ path: `${__dirname}/.env` });
 
 // possible error messages that can occur on this program.
 const programMessageLists = {

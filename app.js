@@ -20,7 +20,7 @@ function saveSessions() {
 
 
 
-import { Client, Collection, Events, GatewayIntentBits } from 'discord.js';
+import { Client, Collection, GatewayIntentBits } from 'discord.js';
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -46,14 +46,6 @@ const client = new Client({
         }
     }
 })();
-
-client.on(Events.MessageCreate, async message => {
-    return message;
-});
-
-client.on(Events.MessageDelete, async message => {
-    return message;
-});
 
 client.login(token);
 

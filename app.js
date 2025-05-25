@@ -15,8 +15,7 @@ const { token } = process.env;
 
 const sshSessions = {};
 function saveSessions() {
-    // Implement your session saving logic here
-    console.log('Saving sessions:', sshSessions);
+    console.log('Saving SSH sessions...');
 }
 
 

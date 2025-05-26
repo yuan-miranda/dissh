@@ -5,6 +5,11 @@ import { saveCredentials } from "../utility/saveCredentials.js";
 import { saveSessions } from "../utility/saveSessions.js";
 import { client, statusMessages } from "../../index.js";
 
+/**
+ * 
+ * @param {string} uid - The user ID for which to create the SSH session.
+ * @param {Object} credentials - The credentials object containing host, port, username, and password. 
+ */
 export async function createSession(uid, credentials) {
     const session = new ssh2.Client();
 

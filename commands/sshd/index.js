@@ -1,32 +1,6 @@
 import { SlashCommandBuilder, MessageFlags } from 'discord.js';
-
-import { client, sshSessions, statusMessages } from '../../index.js';
-import { getSession } from '../utility/getSession.js';
-import { getCredentials } from '../utility/getCredentials.js';
-import { createSession } from '../utility/createSession.js';
-import { saveSessions } from '../utility/saveSessions.js';
-import { getCurrentTime } from '../utility/getCurrentTime.js';
-
-async function connectSession(uid, credentials) {
-    if (getSession(uid)) throw new Error(statusMessages.alreadyConnected);
-    if (!credentials) throw new Error(statusMessages.noCredentials);
-
-    try {
-        const newSession = await createSession(uid, credentials);
-
-        client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
-        client.users.fetch(uid).then(async (user) => console.log(`${getCurrentTime()} ${user.tag} connected to ${credentials.host}:${credentials.port} as ${credentials.username}`));
-
-        saveSessions(uid, newSession);
-        return newSession;
-    } catch (error) {
-        throw new Error(error.message);
-    }
-}
-
-async function autoConnectSession(uid) {
-    await connectSession(uid, getCredentials(uid));
-}
+import { connectSession } from '../utility/connectSession.js';
+import { autoConnectSession } from '../utility/autoConnectSession.js';
 
 export const data = new SlashCommandBuilder()
     .setName('sshd')

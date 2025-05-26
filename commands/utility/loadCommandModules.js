@@ -2,6 +2,11 @@ import { readdirSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 
+/**
+ * 
+ * @param {string} basePath - The base path where the commands are located. 
+ * @returns 
+ */
 export async function loadCommandModules(basePath) {
     const commands = [];
     const commandFolders = readdirSync(path.join(basePath, 'commands'));

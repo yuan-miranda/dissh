@@ -4,6 +4,12 @@ import { getStream } from './getStream.js';
 import { saveStreamOutput } from './saveStreamOutput.js';
 import { statusMessages } from '../../index.js';
 
+/**
+ * 
+ * @param {string} uid - The user ID for which to execute the command.
+ * @param {string} command - The command to execute in the SSH session. 
+ * @returns 
+ */
 export async function executeCommand(uid, command) {
     const stripAnsi = await import('strip-ansi');
     const session = getSession(uid);

@@ -8,6 +8,10 @@ import { removeActiveMessage } from "./removeActiveMessage.js"
 import { getCurrentTime } from "./getCurrentTime.js"
 import { client, sshSessions, statusMessages } from "../../index.js";
 
+/**
+ * 
+ * @param {string} uid - The user ID for which to disconnect the SSH session. 
+ */
 export async function disconnectSession(uid) {
     const session = getSession(uid);
     if (!session) throw new Error(statusMessages.noActiveSession);
@@ -19,7 +23,7 @@ export async function disconnectSession(uid) {
 
     client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
     client.users.fetch(uid).then(async (user) => console.log(`${getCurrentTime()} ${user.tag} disconnected to ${session.host}:${session.port} as ${session.username}`));
-    
+
     if (getActiveMessage(uid)) {
         saveOldMessage(getActiveMessage(uid).id, getActiveMessage(uid));
         removeActiveMessage(uid);

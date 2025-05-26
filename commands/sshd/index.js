@@ -67,6 +67,9 @@ export async function execute(interaction) {
 
     } catch (error) {
         console.error(error);
-        return interaction.editReply(error.message);
+        return interaction.editReply({
+            content: error.message,
+            flags: MessageFlags.Ephemeral
+        })
     }
 }

@@ -58,6 +58,9 @@ export async function execute(interaction) {
         saveMessageAuthor(message.id, uid);
     } catch (error) {
         console.error(error);
-        await interaction.editReply({ content: error.message, ephemeral: MessageFlags.Ephemeral });
+        await interaction.editReply({
+            content: error.message,
+            ephemeral: MessageFlags.Ephemeral
+        });
     }
 }

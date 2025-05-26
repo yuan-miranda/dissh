@@ -14,6 +14,9 @@ export async function execute(interaction) {
         await interaction.editReply('You have been disconnected from the session.');
     } catch (error) {
         console.error(error);
-        await interaction.editReply(error.message);
+        await interaction.editReply({
+            content: error.message,
+            flags: MessageFlags.Ephemeral
+        })
     }
 }

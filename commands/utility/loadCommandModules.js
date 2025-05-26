@@ -21,7 +21,7 @@ export async function loadCommandModules(basePath) {
                 console.warn(`The command at ${commandPath} is missing a required "data" or "execute" property.`);
             }
         } catch (error) {
-            console.error(`Failed to load command from ${commandPath}:`, error);
+            console.error(error);
         }
     }
 

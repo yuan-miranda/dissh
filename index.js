@@ -43,16 +43,16 @@ const statusMessages = {
 };
 
 export {
-  __dirname,
-  client,
-  token,
-  clientId,
-  messageAuthor,
-  messageLocations,
-  oldMessages,
-  activeMessages,
-  sshStreamOutputs,
-  sshStreams,
-  sshSessions,
-  statusMessages
+    __dirname,
+    client,
+    token,
+    clientId,
+    messageAuthor,
+    messageLocations,
+    oldMessages,
+    activeMessages,
+    sshStreamOutputs,
+    sshStreams,
+    sshSessions,
+    statusMessages
 };

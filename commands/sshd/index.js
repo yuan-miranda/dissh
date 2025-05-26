@@ -1,4 +1,32 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder, MessageFlags } from 'discord.js';
+
+import { client, sshSessions } from '../../index.js';
+import { getSession } from '../utility/getSession.js';
+import { getCredentials } from '../utility/getCredentials.js';
+import { createSession } from '../utility/createSession.js';
+import { saveSessions } from '../utility/saveSessions.js';
+import { getCurrentTime } from '../utility/getCurrentTime.js';
+
+async function connectSession(uid, credentials) {
+    if (getSession(uid)) throw new Error('You are already connected to a session.');
+    if (!credentials) throw new Error('No saved credentials found.');
+
+    try {
+        const newSession = await createSession(uid, credentials);
+
+        client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
+        client.users.fetch(uid).then(async (user) => console.log(`${getCurrentTime()} ${user.tag} connected to ${credentials.host}:${credentials.port} as ${credentials.username}`));
+
+        saveSessions(uid, newSession);
+        return newSession;
+    } catch (error) {
+        throw new Error(error.message);
+    }
+}
+
+async function autoConnectSession(uid) {
+    await connectSession(uid, getCredentials(uid));
+}
 
 export const data = new SlashCommandBuilder()
     .setName('sshd')
@@ -21,5 +49,24 @@ export const data = new SlashCommandBuilder()
             .setRequired(false));
 
 export async function execute(interaction) {
-    await interaction.reply('SSH session handling is not yet implemented.');
+    const uid = interaction.user.id;
+
+    const host = interaction.options.getString('host');
+    const port = interaction.options.getInteger('port') || 22;
+    const username = interaction.options.getString('username');
+    const password = interaction.options.getString('password');
+
+    await interaction.deferReply({ ephemeral: MessageFlags.Ephemeral });
+    try {
+        if (!host && !username) {
+            await autoConnectSession(uid);
+        } else {
+            await connectSession(uid, { host, port, username, password });
+        }
+        return interaction.editReply('Connected to the session successfully.');
+
+    } catch (error) {
+        console.error(error);
+        return interaction.editReply(error.message);
+    }
 }

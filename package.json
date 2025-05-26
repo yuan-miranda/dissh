@@ -4,7 +4,8 @@
     "discord.js": "^14.19.3",
     "dotenv": "^16.5.0",
     "node-cron": "^4.0.7",
-    "ssh2": "^1.16.0"
+    "ssh2": "^1.16.0",
+    "strip-ansi": "^7.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",

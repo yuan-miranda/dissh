@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder, MessageFlags } from 'discord.js';
 
 export const data = new SlashCommandBuilder()
     .setName('exit')
@@ -7,6 +7,6 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction) {
     await interaction.reply({
         content: 'Exit command is not yet implemented. Use `/purge` to delete saved credentials.',
-        ephemeral: true
+        ephemeral: MessageFlags.Ephemeral
     });
 }

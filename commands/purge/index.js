@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder, MessageFlags } from 'discord.js';
 
 export const data = new SlashCommandBuilder()
     .setName('purge')
@@ -7,6 +7,6 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction) {
     await interaction.reply({
         content: 'Purge command is not yet implemented.',
-        ephemeral: true
+        ephemeral: MessageFlags.Ephemeral
     });
 }

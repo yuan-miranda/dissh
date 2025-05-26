@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, MessageFlags } from 'discord.js';
 
-import { client, sshSessions } from '../../index.js';
+import { client, sshSessions, statusMessages } from '../../index.js';
 import { getSession } from '../utility/getSession.js';
 import { getCredentials } from '../utility/getCredentials.js';
 import { createSession } from '../utility/createSession.js';
@@ -8,8 +8,8 @@ import { saveSessions } from '../utility/saveSessions.js';
 import { getCurrentTime } from '../utility/getCurrentTime.js';
 
 async function connectSession(uid, credentials) {
-    if (getSession(uid)) throw new Error('You are already connected to a session.');
-    if (!credentials) throw new Error('No saved credentials found.');
+    if (getSession(uid)) throw new Error(statusMessages.alreadyConnected);
+    if (!credentials) throw new Error(statusMessages.noCredentials);
 
     try {
         const newSession = await createSession(uid, credentials);

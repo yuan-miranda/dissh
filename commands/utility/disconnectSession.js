@@ -6,11 +6,11 @@ import { getActiveMessage } from "./getActiveMessage.js"
 import { saveOldMessage } from "./saveOldMessage.js"
 import { removeActiveMessage } from "./removeActiveMessage.js"
 import { getCurrentTime } from "./getCurrentTime.js"
-import { client, sshSessions } from "../../index.js";
+import { client, sshSessions, statusMessages } from "../../index.js";
 
 export async function disconnectSession(uid) {
     const session = getSession(uid);
-    if (!session) throw new Error("No active session found.");
+    if (!session) throw new Error(statusMessages.noActiveSession);
 
     session.end();
     removeSession(uid);

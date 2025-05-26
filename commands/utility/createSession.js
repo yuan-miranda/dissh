@@ -3,7 +3,7 @@ import ssh2 from "ssh2";
 import { disconnectSession } from "../utility/disconnectSession.js";
 import { saveCredentials } from "../utility/saveCredentials.js";
 import { saveSessions } from "../utility/saveSessions.js";
-import { client } from "../../index.js";
+import { client, statusMessages } from "../../index.js";
 
 export async function createSession(uid, credentials) {
     const session = new ssh2.Client();
@@ -13,13 +13,13 @@ export async function createSession(uid, credentials) {
             await disconnectSession(uid);
             await client.users.fetch(uid).then(async (user) => user.send({ content: "You have been disconnected from the session.", ephemeral: MessageFlags.Ephemeral }));
         } else if (err.message === "Timed out while waiting for handshake") {
-            throw new Error("Session connection timed out. Please try again.");
+            throw new Error(statusMessages.sessionTimeout);
         } else if (err.message === "getaddrinfo ENOTFOUND") {
-            throw new Error("Invalid host. Please check the hostname or IP address.");
+            throw new Error(statusMessages.invalidHost);
         } else if (err.message === "connect ECONNREFUSED") {
-            throw new Error("Connection refused. Please check the port number.");
+            throw new Error(statusMessages.invalidPort);
         } else if (err.message === 'All configured authentication methods failed') {
-            throw new Error("Invalid password. Please check your credentials.");
+            throw new Error(statusMessages.invalidPassword);
         } else {
             throw err;
         }

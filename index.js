@@ -28,4 +28,31 @@ const sshStreamOutputs = {};
 const sshStreams = {};
 const sshSessions = {};
 
-export { client, token, clientId, messageAuthor, messageLocations, oldMessages, activeMessages, sshStreamOutputs, sshStreams, sshSessions, __dirname };
+const statusMessages = {
+    alreadyConnected: 'You are already connected to a session.',
+    noCredentials: 'No saved credentials found.',
+    invalidHost: 'Invalid or unreachable host address.',
+    invalidPort: 'Invalid port or session is unreachable. The default port is 22.',
+    invalidPassword: 'Incorrect password.',
+    noActiveSession: 'No active session found.',
+    connected: 'Connected to the session.',
+    disconnected: 'Disconnected from the session.',
+    credentialDeleted: 'Credential deleted successfully.',
+    noResponse: 'The session did not respond.',
+    sessionTimeout: 'Connection timed out.',
+};
+
+export {
+  __dirname,
+  client,
+  token,
+  clientId,
+  messageAuthor,
+  messageLocations,
+  oldMessages,
+  activeMessages,
+  sshStreamOutputs,
+  sshStreams,
+  sshSessions,
+  statusMessages
+};

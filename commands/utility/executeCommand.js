@@ -2,11 +2,12 @@ import { getSession } from './getSession.js';
 import { getStreamOutput } from './getStreamOutput.js';
 import { getStream } from './getStream.js';
 import { saveStreamOutput } from './saveStreamOutput.js';
+import { statusMessages } from '../../index.js';
 
 export async function executeCommand(uid, command) {
     const stripAnsi = await import('strip-ansi');
     const session = getSession(uid);
-    if (!session) throw new Error("No active session found.");
+    if (!session) throw new Error(statusMessages.noActiveSession);
 
     let streamOutput = getStreamOutput(uid) || "";
     let stream;

@@ -1,5 +1,5 @@
 ## Discord Interactive Shell (dissh)
-A discord bot capable of accessing remote shell.
+A discord bot capable of accessing remote shell. [Open in Discord](https://discord.gg/uEKrTk874z)
 
 
 

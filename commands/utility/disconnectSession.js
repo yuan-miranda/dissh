@@ -1,3 +1,4 @@
+import { ActivityType } from "discord.js";
 import { getSession } from "./getSession.js"
 import { removeSession } from "./removeSession.js"
 import { removeStream } from "./removeStream.js"
@@ -21,7 +22,12 @@ export async function disconnectSession(uid) {
     removeStream(uid);
     removeStreamOutput(uid);
 
-    client.user.setActivity(`${Object.keys(sshSessions).length || 0} active session(s)`);
+    client.user.setActivity({
+        name: `${Object.keys(sshSessions).length || 0} active session(s)`,
+        type: ActivityType.Streaming,
+        url: 'https://www.twitch.tv/yuanezekielamiranda'
+    });
+
     client.users.fetch(uid).then(async (user) => console.log(`${getCurrentTime()} ${user.tag} disconnected to ${session.host}:${session.port} as ${session.username}`));
 
     if (getActiveMessage(uid)) {

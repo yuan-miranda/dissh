@@ -1,5 +1,12 @@
 ## Discord Interactive Shell (dissh)
 A discord bot capable of accessing remote shell.
+
+
+
+https://github.com/user-attachments/assets/23a0e6b1-f6bb-43ee-864b-08df28ce962d
+
+
+
 > [bot.js](https://github.com/yuan-miranda/dissh/blob/main/bot.js) source code of the bot.<br>
 > [deploy-commands.js](https://github.com/yuan-miranda/dissh/blob/main/deploy-commands.js) used to register the command.
 

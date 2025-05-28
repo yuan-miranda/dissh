@@ -2,7 +2,6 @@ import { ActivityType } from 'discord.js';
 import { client, sshSessions, statusMessages } from '../../index.js';
 import { getSession } from '../utility/getSession.js';
 import { createSession } from '../utility/createSession.js';
-import { saveSessions } from '../utility/saveSessions.js';
 import { getCurrentTime } from '../utility/getCurrentTime.js';
 
 /**
@@ -17,7 +16,6 @@ export async function connectSession(uid, credentials) {
 
     try {
         const newSession = await createSession(uid, credentials);
-        saveSessions(uid, newSession);
 
         client.user.setActivity({
             name: `${Object.keys(sshSessions).length || 0} active session(s)`,

@@ -17,6 +17,7 @@ export async function connectSession(uid, credentials) {
 
     try {
         const newSession = await createSession(uid, credentials);
+        saveSessions(uid, newSession);
 
         client.user.setActivity({
             name: `${Object.keys(sshSessions).length || 0} active session(s)`,
@@ -26,7 +27,6 @@ export async function connectSession(uid, credentials) {
 
         client.users.fetch(uid).then(async (user) => console.log(`${getCurrentTime()} ${user.tag} connected to ${credentials.host}:${credentials.port} as ${credentials.username}`));
 
-        saveSessions(uid, newSession);
         return newSession;
     } catch (error) {
         throw new Error(error.message);

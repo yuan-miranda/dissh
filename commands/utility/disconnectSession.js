@@ -17,6 +17,8 @@ export async function disconnectSession(uid) {
     const session = getSession(uid);
     if (!session) throw new Error(statusMessages.noActiveSession);
 
+    client.users.fetch(uid).then(async (user) => console.log(`${getCurrentTime()} ${user.tag} disconnected to ${session.config.host}:${session.config.port} as ${session.config.username}`));
+
     session.end();
     removeSession(uid);
     removeStream(uid);
@@ -27,8 +29,6 @@ export async function disconnectSession(uid) {
         type: ActivityType.Streaming,
         url: 'https://www.twitch.tv/yuanezekielamiranda'
     });
-
-    client.users.fetch(uid).then(async (user) => console.log(`${getCurrentTime()} ${user.tag} disconnected to ${session.host}:${session.port} as ${session.username}`));
 
     if (getActiveMessage(uid)) {
         saveOldMessage(getActiveMessage(uid).id, getActiveMessage(uid));

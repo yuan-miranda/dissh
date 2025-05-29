@@ -23,11 +23,11 @@ export async function execute(interaction) {
     const guildId = interaction.guildId;
 
     const command = interaction.options.getString('command');
-    const button = new ButtonBuilder()
+    const viewTextButton = new ButtonBuilder()
         .setCustomId('text_view')
         .setLabel('View in Text')
         .setStyle(ButtonStyle.Primary);
-    const row = new ActionRowBuilder().addComponents(button);
+    const row = new ActionRowBuilder().addComponents(viewTextButton);
 
     await interaction.deferReply();
     try {

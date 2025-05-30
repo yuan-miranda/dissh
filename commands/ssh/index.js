@@ -27,7 +27,11 @@ export async function execute(interaction) {
         .setCustomId('text_view')
         .setLabel('View in Text')
         .setStyle(ButtonStyle.Primary);
-    const row = new ActionRowBuilder().addComponents(viewTextButton);
+    const cleanButton = new ButtonBuilder()
+        .setCustomId('text_clean')
+        .setLabel('Clean Text')
+        .setStyle(ButtonStyle.Secondary);
+    const row = new ActionRowBuilder().addComponents(viewTextButton, cleanButton);
 
     await interaction.deferReply();
     try {

@@ -1,9 +1,9 @@
-import { MessageFlags } from "discord.js";
+import { MessageFlags, ActivityType } from "discord.js";
 import ssh2 from "ssh2";
 import { disconnectSession } from "../utility/disconnectSession.js";
 import { saveCredentials } from "../utility/saveCredentials.js";
 import { saveSessions } from "../utility/saveSessions.js";
-import { client, statusMessages } from "../../index.js";
+import { client, statusMessages, sshSessions } from "../../index.js";
 
 /**
  * 
@@ -35,6 +35,12 @@ export async function createSession(uid, credentials) {
     session.once("ready", () => {
         saveSessions(uid, session);
         saveCredentials(uid, credentials);
+
+        client.user.setActivity({
+            name: `${Object.keys(sshSessions).length || 0} active session(s)`,
+            type: ActivityType.Streaming,
+            url: 'https://www.twitch.tv/yuanezekielamiranda'
+        });
     }).connect({
         host: credentials.host,
         port: credentials.port,

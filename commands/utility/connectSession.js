@@ -1,5 +1,4 @@
-import { ActivityType } from 'discord.js';
-import { client, sshSessions, statusMessages } from '../../index.js';
+import { client, statusMessages } from '../../index.js';
 import { getSession } from '../utility/getSession.js';
 import { createSession } from '../utility/createSession.js';
 import { getCurrentTime } from '../utility/getCurrentTime.js';
@@ -16,12 +15,6 @@ export async function connectSession(uid, credentials) {
 
     try {
         const newSession = await createSession(uid, credentials);
-
-        client.user.setActivity({
-            name: `${Object.keys(sshSessions).length || 0} active session(s)`,
-            type: ActivityType.Streaming,
-            url: 'https://www.twitch.tv/yuanezekielamiranda'
-        });
 
         client.users.fetch(uid).then(async (user) => console.log(`${getCurrentTime()} ${user.tag} connected to ${credentials.host}:${credentials.port} as ${credentials.username}`));
 
